@@ -411,7 +411,10 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text in settings_map:
             key, prompt = settings_map[text]
             context.user_data["setting"] = key
-            cur = config.get(key, "")
+            context.user_data["mode"] = "settings"
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                current_config = json.load(f)
+            cur = current_config.get(key, "")
             if not cur:
                 cur = "تنظیم نشده"
             await update.message.reply_text(f"📝 مقدار فعلی:\n{cur}\n\n{prompt}", reply_markup=input_cancel_menu())

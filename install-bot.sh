@@ -81,7 +81,12 @@ def setup_config():
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        cfg = json.load(f)
+    if "START_TEXT" not in cfg:
+        cfg["START_TEXT"] = "👋 سلام! به ربات فروشگاه خوش آمدید."
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    return cfg
 
 def save_config():
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -407,7 +412,9 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             key, prompt = settings_map[text]
             context.user_data["setting"] = key
             cur = config.get(key, "")
-            await update.message.reply_text(f"مقدار فعلی: {cur}\n\n{prompt}", reply_markup=input_cancel_menu())
+            if not cur:
+                cur = "تنظیم نشده"
+            await update.message.reply_text(f"📝 مقدار فعلی:\n{cur}\n\n{prompt}", reply_markup=input_cancel_menu())
             return
 
         if "setting" in context.user_data:

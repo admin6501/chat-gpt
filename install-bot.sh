@@ -146,8 +146,8 @@ def admin_menu():
 def discount_menu():
     return ReplyKeyboardMarkup(
         [["➕ افزودن کد تخفیف", "📋 لیست کدهای تخفیف"],
-         ["❌ غیرفعال کردن کد", "📊 آمار استفاده کد"],
-         ["بازگشت"]],
+         ["❌ غیرفعال کردن کد", "🗑️ حذف کد تخفیف"],
+         ["📊 آمار استفاده کد", "بازگشت"]],
         resize_keyboard=True
     )
 
@@ -541,6 +541,30 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["discount_action"] = "stats"
             return
 
+        # حذف کد تخفیف
+        if text == "🗑️ حذف کد تخفیف":
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("SELECT code, discount_type, discount_value, is_active FROM discount_codes ORDER BY id DESC")
+            codes = c.fetchall()
+            conn.close()
+            
+            if not codes:
+                await update.message.reply_text("📭 هیچ کد تخفیفی برای حذف وجود ندارد.", reply_markup=discount_menu())
+                return
+            
+            msg = "🗑️ لیست کدهای تخفیف برای حذف:\n\n"
+            for code in codes:
+                code_text, dtype, dvalue, is_active = code
+                type_text = f"{dvalue}%" if dtype == "percent" else f"{dvalue:,} تومان"
+                status = "✅" if is_active else "❌"
+                msg += f"{status} {code_text} | {type_text}\n"
+            
+            msg += "\n🎟️ کد تخفیف مورد نظر برای حذف را وارد کنید:"
+            await update.message.reply_text(msg, reply_markup=discount_menu())
+            context.user_data["discount_action"] = "delete"
+            return
+
         # پردازش ورودی‌های کد تخفیف
         if context.user_data.get("discount_action") == "add":
             try:
@@ -613,6 +637,30 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ کد تخفیف یافت نشد.", reply_markup=discount_menu())
             conn.commit()
             conn.close()
+            context.user_data["discount_action"] = None
+            return
+
+        if context.user_data.get("discount_action") == "delete":
+            code = text.strip().upper()
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            
+            # بررسی وجود کد
+            c.execute("SELECT id FROM discount_codes WHERE code=?", (code,))
+            if not c.fetchone():
+                await update.message.reply_text("❌ کد تخفیف یافت نشد.", reply_markup=discount_menu())
+                conn.close()
+                context.user_data["discount_action"] = None
+                return
+            
+            # حذف سوابق استفاده از کد
+            c.execute("DELETE FROM discount_usage WHERE code=?", (code,))
+            # حذف کد تخفیف
+            c.execute("DELETE FROM discount_codes WHERE code=?", (code,))
+            conn.commit()
+            conn.close()
+            
+            await update.message.reply_text(f"🗑️ کد تخفیف {code} و تمام سوابق استفاده آن حذف شد.", reply_markup=discount_menu())
             context.user_data["discount_action"] = None
             return
 

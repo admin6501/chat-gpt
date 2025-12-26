@@ -47,7 +47,8 @@ def setup_config():
             "ABOUT_TEXT": "تنظیم نشده",
             "RULES_TEXT": "تنظیم نشده",
             "SUPPORT_TEXT": "تنظیم نشده",
-            "CANCEL_TIME_MINUTES": 20
+            "CANCEL_TIME_MINUTES": 20,
+            "CHECK_INTERVAL_SECONDS": 60
         }
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -157,7 +158,7 @@ def settings_menu():
         [["🛒 تنظیم نام محصول", "💰 تنظیم قیمت محصول"],
          ["💳 تنظیم شماره کارت", "ℹ️ تنظیم درباره محصول"],
          ["📜 تنظیم قوانین", "📞 تنظیم پشتیبانی"],
-         ["⏰ تنظیم زمان لغو سفارش (دقیقه)"],
+         ["⏰ زمان لغو سفارش", "🔄 بازه چک سفارش‌ها"],
          ["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]],
         resize_keyboard=True
     )
@@ -791,25 +792,66 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("متن جدید پشتیبانی را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "SUPPORT_TEXT"
             return
-        if text == "⏰ تنظیم زمان لغو سفارش (دقیقه)":
-            await update.message.reply_text("زمان جدید لغو سفارش (دقیقه) را وارد کنید:", reply_markup=input_cancel_menu())
+        if text == "⏰ زمان لغو سفارش":
+            current = config.get("CANCEL_TIME_MINUTES", 20)
+            await update.message.reply_text(
+                f"⏰ زمان فعلی لغو سفارش: {current} دقیقه\n\n"
+                "زمان جدید لغو سفارش (به دقیقه) را وارد کنید:\n"
+                "(سفارش‌هایی که تا این مدت رسید ارسال نکنند، لغو می‌شوند)",
+                reply_markup=input_cancel_menu()
+            )
             context.user_data["setting"] = "CANCEL_TIME_MINUTES"
+            return
+        if text == "🔄 بازه چک سفارش‌ها":
+            current = config.get("CHECK_INTERVAL_SECONDS", 60)
+            await update.message.reply_text(
+                f"🔄 بازه فعلی چک سفارش‌ها: {current} ثانیه\n\n"
+                "بازه جدید چک سفارش‌ها (به ثانیه) را وارد کنید:\n"
+                "(هر چند ثانیه یکبار سفارش‌های منقضی چک شوند)\n\n"
+                "💡 پیشنهاد: بین 30 تا 120 ثانیه",
+                reply_markup=input_cancel_menu()
+            )
+            context.user_data["setting"] = "CHECK_INTERVAL_SECONDS"
             return
 
         # ذخیره مقدار جدید
         if "setting" in context.user_data:
             key = context.user_data["setting"]
             value = text
-            if key == "PRODUCT_PRICE" or key == "CANCEL_TIME_MINUTES":
+            if key in ["PRODUCT_PRICE", "CANCEL_TIME_MINUTES", "CHECK_INTERVAL_SECONDS"]:
                 try:
                     value = int(value)
+                    if value <= 0:
+                        raise ValueError("مقدار باید بزرگتر از صفر باشد")
+                    if key == "CHECK_INTERVAL_SECONDS" and value < 10:
+                        await update.message.reply_text("❌ بازه چک نباید کمتر از 10 ثانیه باشد.", reply_markup=settings_menu())
+                        context.user_data.clear()
+                        context.user_data["mode"] = "settings"
+                        return
                 except ValueError:
-                    await update.message.reply_text("❌ لطفاً مقدار عددی وارد کنید.")
+                    await update.message.reply_text("❌ لطفاً مقدار عددی معتبر وارد کنید.", reply_markup=settings_menu())
+                    context.user_data.clear()
+                    context.user_data["mode"] = "settings"
                     return
+            
             config[key] = value
             save_config()
+            
+            # پیام تایید با نام فارسی
+            key_names = {
+                "PRODUCT_NAME": "نام محصول",
+                "PRODUCT_PRICE": "قیمت محصول",
+                "CARD_NUMBER": "شماره کارت",
+                "ABOUT_TEXT": "درباره محصول",
+                "RULES_TEXT": "قوانین",
+                "SUPPORT_TEXT": "پشتیبانی",
+                "CANCEL_TIME_MINUTES": "زمان لغو سفارش",
+                "CHECK_INTERVAL_SECONDS": "بازه چک سفارش‌ها"
+            }
+            key_name = key_names.get(key, key)
+            
             context.user_data.clear()
-            await update.message.reply_text(f"✅ مقدار جدید برای {key} ذخیره شد.", reply_markup=settings_menu())
+            await update.message.reply_text(f"✅ {key_name} با موفقیت ذخیره شد.", reply_markup=settings_menu())
             context.user_data["mode"] = "settings"
             return
 
@@ -973,7 +1015,9 @@ def main():
 
     # Job برای لغو خودکار سفارش‌های منقضی
     job_queue = app.job_queue
-    job_queue.run_repeating(cancel_expired_orders, interval=60, first=10)
+    check_interval = config.get("CHECK_INTERVAL_SECONDS", 60)
+    job_queue.run_repeating(cancel_expired_orders, interval=check_interval, first=10)
+    logger.info(f"⏰ بازه چک سفارش‌ها: هر {check_interval} ثانیه")
 
     # کاربر
     app.add_handler(CommandHandler("start", start))

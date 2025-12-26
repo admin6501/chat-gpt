@@ -39,11 +39,15 @@
 
 ### 🧩 ورود به محیط tmux
 
+```bash
 tmux
+```
 
 > اگر tmux نصب نبود، با دستور زیر نصبش کنید:
 
+```bash
 apt install tmux -y
+```
 
 ---
 
@@ -51,7 +55,13 @@ apt install tmux -y
 
 برای نصب و اجرای خودکار ربات کافیست این دستورات را در ترمینال کپی و اجرا کنید 👇
 
-sudo apt update -y sudo apt install -y curl curl -O https://raw.githubusercontent.com/admin6501/chat-gpt/refs/heads/main/imstall-bot.sh chmod +x imstall-bot.sh bash imstall-bot.sh
+```bash
+sudo apt update -y && \
+sudo apt install -y curl && \
+curl -O https://raw.githubusercontent.com/admin6501/chat-gpt/refs/heads/main/install-bot.sh && \
+chmod +x install-bot.sh && \
+bash install-bot.sh
+```
 
 ---
 
@@ -65,11 +75,13 @@ sudo apt update -y sudo apt install -y curl curl -O https://raw.githubuserconten
 💡 نکته:  
 برای خروج از محیط tmux بدون بستن ربات، کلیدهای زیر را بزنید:
 
-Ctrl + B سپس D
+`Ctrl + B` سپس `D`
 
 برای بازگشت به محیط ربات:
 
+```bash
 tmux attach
+```
 
 ---
 
@@ -77,13 +89,26 @@ tmux attach
 
 اگر تمایل دارید به‌صورت دستی ربات را نصب کنید:
 
-git clone https://github.com/admin6501/chat-gpt.git cd chat-gpt chmod +x imstall-bot.sh ./imstall-bot.sh
+```bash
+git clone https://github.com/admin6501/chat-gpt.git && \
+cd chat-gpt && \
+chmod +x install-bot.sh && \
+./install-bot.sh
+```
 
 ---
 
 ## 🧩 ساختار پروژه
 
-📦 ChatGPT-Seller-Bot/ │ ├── bot.py              ← کد اصلی ربات (مدیریت کاربران و ادمین) ├── imstall-bot.sh       ← اسکریپت نصب و اجرای خودکار ├── config.json          ← تنظیمات فروشگاه ├── orders.db            ← دیتابیس سفارش‌ها (SQLite) └── README.md            ← مستندات پروژه
+```
+📦 ChatGPT-Seller-Bot/
+│
+├── bot.py              ← کد اصلی ربات (مدیریت کاربران و ادمین)
+├── install-bot.sh      ← اسکریپت نصب و اجرای خودکار
+├── config.json         ← تنظیمات فروشگاه
+├── orders.db           ← دیتابیس سفارش‌ها (SQLite)
+└── README.md           ← مستندات پروژه
+```
 
 ---
 

@@ -18,10 +18,11 @@ cat > bot.py << 'PYEOF'
 ✅ پنل ادمین کامل
 ✅ دکمه بازگشت همه‌جا فعال
 ✅ دکمه ⚙️ تنظیمات فروشگاه کاملاً کاربردی
+✅ سیستم لغو خودکار سفارش
 """
 
 import os, json, sqlite3, logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
@@ -116,6 +117,46 @@ def settings_menu():
         resize_keyboard=True
     )
 
+# ---- سیستم لغو خودکار سفارش ----
+async def cancel_expired_orders(context: ContextTypes.DEFAULT_TYPE):
+    """لغو خودکار سفارش‌های منقضی شده"""
+    cancel_minutes = config.get("CANCEL_TIME_MINUTES", 20)
+    cutoff_time = datetime.now(IRAN_TZ) - timedelta(minutes=cancel_minutes)
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, user_id, fullname FROM orders 
+        WHERE status='pending' AND receipt IS NULL AND created_at < ?
+    """, (cutoff_time.isoformat(),))
+    expired_orders = c.fetchall()
+    
+    for order in expired_orders:
+        order_id, user_id, fullname = order
+        c.execute("UPDATE orders SET status='cancelled' WHERE id=?", (order_id,))
+        logger.info(f"سفارش #{order_id} به دلیل عدم پرداخت لغو شد.")
+        
+        # اطلاع به کاربر
+        try:
+            await context.bot.send_message(
+                user_id,
+                f"⛔ سفارش #{order_id} شما به دلیل عدم ارسال رسید پرداخت در مدت {cancel_minutes} دقیقه لغو شد."
+            )
+        except Exception as e:
+            logger.error(f"خطا در ارسال پیام لغو به کاربر: {e}")
+        
+        # اطلاع به ادمین
+        try:
+            await context.bot.send_message(
+                ADMIN_CHAT_ID,
+                f"🔴 سفارش #{order_id} ({fullname}) به دلیل عدم پرداخت لغو شد."
+            )
+        except Exception as e:
+            logger.error(f"خطا در ارسال پیام لغو به ادمین: {e}")
+    
+    conn.commit()
+    conn.close()
+
 # ---- کاربر ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -140,7 +181,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        f"✅ سفارش #{oid} ثبت شد.\n💳 شماره کارت:\n{config['CARD_NUMBER']}\n\nپس از پرداخت، رسید خود را ارسال کنید.",
+        f"✅ سفارش #{oid} ثبت شد.\n💳 شماره کارت:\n{config['CARD_NUMBER']}\n\nپس از پرداخت، رسید خود را ارسال کنید.\n⏰ زمان پرداخت: {config['CANCEL_TIME_MINUTES']} دقیقه",
         reply_markup=after_order_menu()
     )
     context.user_data["current_order"] = oid
@@ -190,8 +231,10 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 شما هیچ سفارشی ندارید.", reply_markup=main_menu())
         return
     msg = "📦 سفارش‌های شما:\n"
+    status_map = {"pending": "در انتظار", "paid": "پرداخت شده", "delivered": "تحویل داده شده", "cancelled": "لغو شده"}
     for r in rows:
-        msg += f"#{r[0]} | {r[2]:,} تومان | وضعیت: {r[1]}\n"
+        status_text = status_map.get(r[1], r[1])
+        msg += f"#{r[0]} | {r[2]:,} تومان | وضعیت: {status_text}\n"
     await update.message.reply_text(msg, reply_markup=main_menu())
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -217,6 +260,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # بازگشت به منوی کاربران
     if text == "بازگشت به منوی اصلی":
+        context.user_data.clear()
         await update.message.reply_text("بازگشت به منوی کاربران.", reply_markup=main_menu())
         return
 
@@ -268,7 +312,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key == "PRODUCT_PRICE" or key == "CANCEL_TIME_MINUTES":
                 try:
                     value = int(value)
-                except:
+                except ValueError:
                     await update.message.reply_text("❌ لطفاً مقدار عددی وارد کنید.")
                     return
             config[key] = value
@@ -278,11 +322,121 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "settings"
             return
 
+    # تایید پرداخت
+    if text == "✅ تایید پرداخت":
+        await update.message.reply_text("🔢 شماره سفارش را برای تایید پرداخت وارد کنید:")
+        context.user_data["mode"] = "confirm_payment"
+        return
+
+    if context.user_data.get("mode") == "confirm_payment":
+        try:
+            order_id = int(text)
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("SELECT user_id, status FROM orders WHERE id=?", (order_id,))
+            row = c.fetchone()
+            if not row:
+                await update.message.reply_text("❌ سفارش یافت نشد.", reply_markup=admin_menu())
+                context.user_data.clear()
+                conn.close()
+                return
+            user_id, status = row
+            if status == "paid":
+                await update.message.reply_text("⚠️ این سفارش قبلاً تایید شده است.", reply_markup=admin_menu())
+                context.user_data.clear()
+                conn.close()
+                return
+            if status == "cancelled":
+                await update.message.reply_text("⚠️ این سفارش لغو شده است.", reply_markup=admin_menu())
+                context.user_data.clear()
+                conn.close()
+                return
+            c.execute("UPDATE orders SET status='paid' WHERE id=?", (order_id,))
+            conn.commit()
+            conn.close()
+            
+            # اطلاع به کاربر
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    f"✅ پرداخت سفارش #{order_id} تایید شد.\n⏳ اکانت شما به زودی ارسال خواهد شد."
+                )
+            except Exception as e:
+                logger.error(f"خطا در ارسال پیام تایید به کاربر: {e}")
+            
+            await update.message.reply_text(f"✅ پرداخت سفارش #{order_id} تایید شد.", reply_markup=admin_menu())
+            context.user_data.clear()
+            return
+        except ValueError:
+            await update.message.reply_text("❌ لطفاً شماره سفارش معتبر وارد کنید.", reply_markup=admin_menu())
+            context.user_data.clear()
+            return
+
+    # ارسال اکانت
+    if text == "📤 ارسال اکانت":
+        await update.message.reply_text("🔢 شماره سفارش را برای ارسال اکانت وارد کنید:")
+        context.user_data["mode"] = "send_account_order"
+        return
+
+    if context.user_data.get("mode") == "send_account_order":
+        try:
+            order_id = int(text)
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("SELECT user_id, status FROM orders WHERE id=?", (order_id,))
+            row = c.fetchone()
+            conn.close()
+            if not row:
+                await update.message.reply_text("❌ سفارش یافت نشد.", reply_markup=admin_menu())
+                context.user_data.clear()
+                return
+            user_id, status = row
+            if status != "paid":
+                await update.message.reply_text("⚠️ این سفارش هنوز پرداخت نشده است.", reply_markup=admin_menu())
+                context.user_data.clear()
+                return
+            context.user_data["mode"] = "send_account_data"
+            context.user_data["order_id"] = order_id
+            context.user_data["user_id"] = user_id
+            await update.message.reply_text("📧 اکانت را به فرمت email | password ارسال کنید:")
+            return
+        except ValueError:
+            await update.message.reply_text("❌ لطفاً شماره سفارش معتبر وارد کنید.", reply_markup=admin_menu())
+            context.user_data.clear()
+            return
+
+    if context.user_data.get("mode") == "send_account_data":
+        account_data = text
+        order_id = context.user_data.get("order_id")
+        user_id = context.user_data.get("user_id")
+        
+        # ارسال اکانت به کاربر
+        try:
+            await context.bot.send_message(
+                user_id,
+                f"🎉 اکانت سفارش #{order_id} شما:\n\n📧 {account_data}\n\n✅ از خرید شما متشکریم!"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ خطا در ارسال به کاربر: {e}", reply_markup=admin_menu())
+            context.user_data.clear()
+            return
+        
+        # بروزرسانی وضعیت سفارش
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE orders SET status='delivered' WHERE id=?", (order_id,))
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text(f"✅ اکانت سفارش #{order_id} ارسال شد.", reply_markup=admin_menu())
+        context.user_data.clear()
+        return
+
     # سایر دستورات ادمین
     if text == "📋 سفارش‌های در انتظار":
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT id, username, price, created_at FROM orders WHERE status='pending'")
+        c.execute("SELECT id, username, price, created_at, receipt FROM orders WHERE status='pending'")
         rows = c.fetchall()
         conn.close()
         if not rows:
@@ -290,7 +444,8 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         msg = "📋 سفارش‌های در انتظار:\n"
         for r in rows:
-            msg += f"#{r[0]} | @{r[1]} | {r[2]:,} تومان | {r[3][:16]}\n"
+            receipt_status = "✅ رسید ارسال شده" if r[4] else "⏳ بدون رسید"
+            msg += f"#{r[0]} | @{r[1]} | {r[2]:,} تومان | {r[3][:16]} | {receipt_status}\n"
         await update.message.reply_text(msg, reply_markup=admin_menu())
         return
 
@@ -299,12 +454,16 @@ def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Job برای لغو خودکار سفارش‌های منقضی
+    job_queue = app.job_queue
+    job_queue.run_repeating(cancel_expired_orders, interval=60, first=10)
+
     # کاربر
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Regex("^🛒 خرید اکانت$"), buy))
     app.add_handler(MessageHandler(filters.Regex("^📤 ارسال رسید پرداخت$"), handle_receipt_request))
     app.add_handler(MessageHandler(filters.Regex("^🔙 بازگشت به منوی اصلی$"), back))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_receipt))
+    app.add_handler(MessageHandler(filters.PHOTO & ~filters.User(ADMIN_CHAT_ID), handle_receipt))
     app.add_handler(MessageHandler(filters.Regex("^📦 سفارش‌های من$"), my_orders))
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ درباره محصول$"), about))
     app.add_handler(MessageHandler(filters.Regex("^📜 قوانین$"), rules))
@@ -313,6 +472,9 @@ def main():
     # ادمین
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(MessageHandler(filters.User(ADMIN_CHAT_ID) & filters.TEXT, admin_action))
+    
+    # هندلر رسید متنی برای کاربران غیر ادمین
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.User(ADMIN_CHAT_ID) & ~filters.COMMAND, handle_receipt))
 
     logger.info("🤖 Bot started (Asia/Tehran)")
     app.run_polling()

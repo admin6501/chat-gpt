@@ -15,7 +15,7 @@ show_menu() {
     echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}    ${GREEN}🤖 مدیریت ربات فروش ChatGPT${NC}            ${BLUE}║${NC}"
     echo -e "${BLUE}╠════════════════════════════════════════════╣${NC}"
-    echo -e "${BLUE}║${NC}  ${YELLOW}1)${NC} 📦 نصب ربات                            ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}1)${NC} 📦 نصب / نصب مجدد ربات                  ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}2)${NC} 🔄 آپدیت ربات (بدون حذف دیتا)           ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}3)${NC} ▶️  استارت ربات                          ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}4)${NC} 🔁 ری‌استارت ربات                        ${BLUE}║${NC}"
@@ -24,6 +24,7 @@ show_menu() {
     echo -e "${BLUE}║${NC}  ${YELLOW}7)${NC} 📥 بازیابی بکاپ                         ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}8)${NC} 📋 مشاهده لاگ                           ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}9)${NC} 📊 وضعیت ربات                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}10)${NC} 🗑️  حذف کامل ربات                       ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}0)${NC} 🚪 خروج                                 ${BLUE}║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
     echo ""
@@ -676,21 +677,66 @@ COMPOSE
 
 install_bot() {
     echo -e "${YELLOW}📦 در حال نصب ربات...${NC}"
+    
+    # بررسی نصب قبلی
+    if [ -d "$BOT_DIR" ] && [ -f "$BOT_DIR/docker-compose.yml" ]; then
+        echo -e "${YELLOW}⚠️  ربات قبلاً نصب شده است.${NC}"
+        read -p "آیا می‌خواهید حذف و از اول نصب شود؟ (y/n): " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo -e "${YELLOW}انصراف از نصب مجدد.${NC}"
+            return
+        fi
+        
+        echo -e "${BLUE}🗑️ در حال حذف نصب قبلی...${NC}"
+        cd $BOT_DIR
+        docker compose down --rmi all -v 2>/dev/null || true
+        cd ..
+        rm -rf $BOT_DIR
+        echo -e "${GREEN}✅ نصب قبلی حذف شد.${NC}"
+    fi
+    
     install_docker
     create_bot_files
     cd $BOT_DIR
     
-    if [ ! -f .env ]; then
-        echo ""
-        read -p "توکن ربات تلگرام: " BOT_TOKEN
-        read -p "آیدی عددی ادمین: " ADMIN_ID
-        echo "BOT_TOKEN=$BOT_TOKEN" > .env
-        echo "ADMIN_ID=$ADMIN_ID" >> .env
-    fi
+    echo ""
+    read -p "توکن ربات تلگرام: " BOT_TOKEN
+    read -p "آیدی عددی ادمین: " ADMIN_ID
+    echo "BOT_TOKEN=$BOT_TOKEN" > .env
+    echo "ADMIN_ID=$ADMIN_ID" >> .env
     
     docker compose up -d --build
     cd ..
     echo -e "${GREEN}✅ ربات نصب و اجرا شد!${NC}"
+}
+
+uninstall_bot() {
+    echo -e "${RED}🗑️ حذف کامل ربات${NC}"
+    
+    if [ ! -d "$BOT_DIR" ]; then
+        echo -e "${YELLOW}⚠️ رباتی نصب نشده است.${NC}"
+        return
+    fi
+    
+    echo -e "${YELLOW}⚠️  هشدار: این عملیات تمام فایل‌ها و دیتای ربات را حذف می‌کند!${NC}"
+    echo -e "${YELLOW}   شامل: سفارش‌ها، کدهای تخفیف، تنظیمات${NC}"
+    echo ""
+    read -p "آیا مطمئن هستید؟ (برای تایید 'DELETE' را تایپ کنید): " confirm
+    
+    if [ "$confirm" != "DELETE" ]; then
+        echo -e "${YELLOW}انصراف از حذف.${NC}"
+        return
+    fi
+    
+    echo -e "${BLUE}🔄 در حال توقف و حذف کانتینر...${NC}"
+    cd $BOT_DIR
+    docker compose down --rmi all -v 2>/dev/null || true
+    cd ..
+    
+    echo -e "${BLUE}🗑️ در حال حذف فایل‌ها...${NC}"
+    rm -rf $BOT_DIR
+    
+    echo -e "${GREEN}✅ ربات به طور کامل حذف شد!${NC}"
 }
 
 update_bot() {
@@ -861,6 +907,7 @@ while true; do
         7) restore_backup ;;
         8) show_logs ;;
         9) show_status ;;
+        10) uninstall_bot ;;
         0) echo -e "${GREEN}خداحافظ! 👋${NC}"; exit 0 ;;
         *) echo -e "${RED}❌ گزینه نامعتبر!${NC}" ;;
     esac

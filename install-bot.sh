@@ -16,13 +16,14 @@ show_menu() {
     echo -e "${BLUE}║${NC}    ${GREEN}🤖 مدیریت ربات فروش ChatGPT${NC}            ${BLUE}║${NC}"
     echo -e "${BLUE}╠════════════════════════════════════════════╣${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}1)${NC} 📦 نصب ربات                            ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${YELLOW}2)${NC} 🔄 آپدیت ربات                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}2)${NC} 🔄 آپدیت ربات (بدون حذف دیتا)           ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}3)${NC} ▶️  استارت ربات                          ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}4)${NC} 🔁 ری‌استارت ربات                        ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}5)${NC} ⏹️  استاپ ربات                           ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}6)${NC} 💾 بکاپ گرفتن                           ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${YELLOW}7)${NC} 📋 مشاهده لاگ                           ${BLUE}║${NC}"
-    echo -e "${BLUE}║${NC}  ${YELLOW}8)${NC} 📊 وضعیت ربات                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}7)${NC} 📥 بازیابی بکاپ                         ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}8)${NC} 📋 مشاهده لاگ                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}9)${NC} 📊 وضعیت ربات                           ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${YELLOW}0)${NC} 🚪 خروج                                 ${BLUE}║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
     echo ""
@@ -694,12 +695,31 @@ install_bot() {
 
 update_bot() {
     echo -e "${YELLOW}🔄 در حال آپدیت ربات...${NC}"
+    
+    if [ -d "$BOT_DIR/data" ]; then
+        echo -e "${BLUE}📂 بکاپ موقت از دیتا...${NC}"
+        cp -r $BOT_DIR/data /tmp/bot_data_backup
+        if [ -f "$BOT_DIR/.env" ]; then
+            cp $BOT_DIR/.env /tmp/bot_env_backup
+        fi
+    fi
+    
     create_bot_files
+    
+    if [ -d "/tmp/bot_data_backup" ]; then
+        echo -e "${BLUE}📂 بازگردانی دیتا...${NC}"
+        rm -rf $BOT_DIR/data
+        mv /tmp/bot_data_backup $BOT_DIR/data
+        if [ -f "/tmp/bot_env_backup" ]; then
+            mv /tmp/bot_env_backup $BOT_DIR/.env
+        fi
+    fi
+    
     cd $BOT_DIR
-    docker compose down
+    docker compose down 2>/dev/null || true
     docker compose up -d --build
     cd ..
-    echo -e "${GREEN}✅ ربات آپدیت شد!${NC}"
+    echo -e "${GREEN}✅ ربات آپدیت شد! (دیتا حفظ شد)${NC}"
 }
 
 start_bot() {
@@ -731,8 +751,86 @@ backup_bot() {
     mkdir -p $BACKUP_DIR
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
     BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
-    tar -czvf $BACKUP_FILE $BOT_DIR/data $BOT_DIR/.env 2>/dev/null || tar -czvf $BACKUP_FILE $BOT_DIR/data 2>/dev/null
+    
+    if [ ! -d "$BOT_DIR/data" ]; then
+        echo -e "${RED}❌ پوشه data وجود ندارد!${NC}"
+        return
+    fi
+    
+    tar -czvf $BACKUP_FILE -C $BOT_DIR data .env 2>/dev/null || tar -czvf $BACKUP_FILE -C $BOT_DIR data 2>/dev/null
     echo -e "${GREEN}✅ بکاپ ذخیره شد: $BACKUP_FILE${NC}"
+    echo -e "${BLUE}📁 شامل: config.json, orders.db, .env${NC}"
+}
+
+restore_backup() {
+    echo -e "${YELLOW}📥 بازیابی بکاپ...${NC}"
+    
+    if [ ! -d "$BACKUP_DIR" ]; then
+        echo -e "${RED}❌ پوشه بکاپ وجود ندارد!${NC}"
+        return
+    fi
+    
+    echo -e "${BLUE}📋 لیست بکاپ‌ها:${NC}"
+    echo ""
+    
+    BACKUPS=($(ls -t $BACKUP_DIR/*.tar.gz 2>/dev/null))
+    
+    if [ ${#BACKUPS[@]} -eq 0 ]; then
+        echo -e "${RED}❌ هیچ بکاپی وجود ندارد!${NC}"
+        return
+    fi
+    
+    for i in "${!BACKUPS[@]}"; do
+        FILENAME=$(basename "${BACKUPS[$i]}")
+        FILESIZE=$(du -h "${BACKUPS[$i]}" | cut -f1)
+        echo -e "  ${YELLOW}$((i+1)))${NC} $FILENAME ${BLUE}($FILESIZE)${NC}"
+    done
+    
+    echo ""
+    read -p "شماره بکاپ را انتخاب کنید (0 برای انصراف): " choice
+    
+    if [ "$choice" == "0" ] || [ -z "$choice" ]; then
+        echo -e "${YELLOW}انصراف از بازیابی.${NC}"
+        return
+    fi
+    
+    INDEX=$((choice-1))
+    
+    if [ $INDEX -lt 0 ] || [ $INDEX -ge ${#BACKUPS[@]} ]; then
+        echo -e "${RED}❌ شماره نامعتبر!${NC}"
+        return
+    fi
+    
+    SELECTED_BACKUP="${BACKUPS[$INDEX]}"
+    echo ""
+    echo -e "${YELLOW}⚠️  هشدار: این عملیات دیتای فعلی را جایگزین می‌کند!${NC}"
+    read -p "آیا مطمئن هستید؟ (y/n): " confirm
+    
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo -e "${YELLOW}انصراف از بازیابی.${NC}"
+        return
+    fi
+    
+    echo -e "${BLUE}🔄 در حال توقف ربات...${NC}"
+    cd $BOT_DIR 2>/dev/null && docker compose down 2>/dev/null
+    cd ..
+    
+    echo -e "${BLUE}📂 در حال بازیابی...${NC}"
+    mkdir -p $BOT_DIR
+    
+    if [ -d "$BOT_DIR/data" ]; then
+        rm -rf $BOT_DIR/data
+    fi
+    
+    tar -xzvf "$SELECTED_BACKUP" -C $BOT_DIR
+    
+    echo -e "${BLUE}🚀 در حال راه‌اندازی مجدد ربات...${NC}"
+    cd $BOT_DIR
+    docker compose up -d
+    cd ..
+    
+    echo -e "${GREEN}✅ بازیابی کامل شد!${NC}"
+    echo -e "${BLUE}📁 فایل‌های بازیابی شده: config.json, orders.db, .env${NC}"
 }
 
 show_logs() {
@@ -760,8 +858,9 @@ while true; do
         4) restart_bot ;;
         5) stop_bot ;;
         6) backup_bot ;;
-        7) show_logs ;;
-        8) show_status ;;
+        7) restore_backup ;;
+        8) show_logs ;;
+        9) show_status ;;
         0) echo -e "${GREEN}خداحافظ! 👋${NC}"; exit 0 ;;
         *) echo -e "${RED}❌ گزینه نامعتبر!${NC}" ;;
     esac

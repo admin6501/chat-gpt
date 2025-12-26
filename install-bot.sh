@@ -67,6 +67,7 @@ def setup_config():
         cfg = {
             "BOT_TOKEN": token,
             "ADMIN_CHAT_ID": int(admin_id),
+            "START_TEXT": "👋 سلام! به ربات فروشگاه خوش آمدید.",
             "PRODUCT_NAME": "اکانت قانونی ChatGPT یک‌ماهه",
             "PRODUCT_PRICE": 350000,
             "CARD_NUMBER": "تنظیم نشده",
@@ -130,11 +131,11 @@ def admin_menu():
 
 def settings_menu():
     return ReplyKeyboardMarkup([
-        ["🛒 نام محصول", "💰 قیمت محصول"],
-        ["💳 شماره کارت", "ℹ️ درباره محصول"],
-        ["📜 قوانین", "📞 پشتیبانی"],
-        ["⏰ زمان لغو سفارش", "🔄 بازه چک سفارش‌ها"],
-        ["🎟️ مدیریت کدهای تخفیف"],
+        ["👋 متن استارت", "🛒 نام محصول"],
+        ["💰 قیمت محصول", "💳 شماره کارت"],
+        ["ℹ️ درباره محصول", "📜 قوانین"],
+        ["📞 پشتیبانی", "⏰ زمان لغو سفارش"],
+        ["🔄 بازه چک سفارش‌ها", "🎟️ مدیریت کدهای تخفیف"],
         ["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]
     ], resize_keyboard=True)
 
@@ -210,7 +211,7 @@ async def cancel_expired_orders(context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = update.effective_user.id == ADMIN_CHAT_ID
-    await update.message.reply_text(f"👋 خوش آمدید!\n🛍️ {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان", reply_markup=main_menu(is_admin))
+    await update.message.reply_text(config.get("START_TEXT", "👋 خوش آمدید!"), reply_markup=main_menu(is_admin))
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["buying"] = True
@@ -392,6 +393,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         settings_map = {
+            "👋 متن استارت": ("START_TEXT", "متن خوش‌آمدگویی را وارد کنید:"),
             "🛒 نام محصول": ("PRODUCT_NAME", "نام محصول را وارد کنید:"),
             "💰 قیمت محصول": ("PRODUCT_PRICE", "قیمت محصول (تومان) را وارد کنید:"),
             "💳 شماره کارت": ("CARD_NUMBER", "شماره کارت را وارد کنید:"),

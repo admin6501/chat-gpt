@@ -113,8 +113,11 @@ def init_db():
     conn.commit()
     conn.close()
 
-def main_menu():
-    return ReplyKeyboardMarkup([["🛒 خرید اکانت", "📦 سفارش‌های من"],["ℹ️ درباره محصول", "📜 قوانین"],["📞 پشتیبانی"]], resize_keyboard=True)
+def main_menu(is_admin=False):
+    keys = [["🛒 خرید اکانت", "📦 سفارش‌های من"],["ℹ️ درباره محصول", "📜 قوانین"],["📞 پشتیبانی"]]
+    if is_admin:
+        keys.append(["👑 پنل مدیریت"])
+    return ReplyKeyboardMarkup(keys, resize_keyboard=True)
 
 def after_order_menu():
     return ReplyKeyboardMarkup([["📤 ارسال رسید پرداخت"], ["🔙 بازگشت به منوی اصلی"]], resize_keyboard=True)
@@ -206,7 +209,8 @@ async def cancel_expired_orders(context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"👋 خوش آمدید!\n🛍️ {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان", reply_markup=main_menu())
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
+    await update.message.reply_text(f"👋 خوش آمدید!\n🛍️ {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان", reply_markup=main_menu(is_admin))
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["buying"] = True
@@ -214,14 +218,16 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buy_with_discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("buying"):
-        await update.message.reply_text("لطفاً ابتدا روی خرید اکانت کلیک کنید.", reply_markup=main_menu())
+        is_admin = update.effective_user.id == ADMIN_CHAT_ID
+        await update.message.reply_text("لطفاً ابتدا روی خرید اکانت کلیک کنید.", reply_markup=main_menu(is_admin))
         return
     context.user_data["waiting_discount_code"] = True
     await update.message.reply_text("🎟️ کد تخفیف را وارد کنید:", reply_markup=user_input_cancel_menu())
 
 async def buy_without_discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("buying"):
-        await update.message.reply_text("لطفاً ابتدا روی خرید اکانت کلیک کنید.", reply_markup=main_menu())
+        is_admin = update.effective_user.id == ADMIN_CHAT_ID
+        await update.message.reply_text("لطفاً ابتدا روی خرید اکانت کلیک کنید.", reply_markup=main_menu(is_admin))
         return
     await process_order(update, context, None)
 
@@ -257,7 +263,8 @@ async def handle_discount_code_input(update: Update, context: ContextTypes.DEFAU
     code = update.message.text.strip()
     if code == "❌ انصراف و بازگشت":
         context.user_data.clear()
-        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
+        is_admin = update.effective_user.id == ADMIN_CHAT_ID
+        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu(is_admin))
         return True
     discount_info, error = validate_discount_code(code, update.effective_user.id)
     if error:
@@ -274,11 +281,13 @@ async def handle_discount_code_input(update: Update, context: ContextTypes.DEFAU
 
 async def back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
+    await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu(is_admin))
 
 async def handle_receipt_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "current_order" not in context.user_data:
-        await update.message.reply_text("⛔ سفارشی در انتظار نیست.", reply_markup=main_menu())
+        is_admin = update.effective_user.id == ADMIN_CHAT_ID
+        await update.message.reply_text("⛔ سفارشی در انتظار نیست.", reply_markup=main_menu(is_admin))
         return
     oid = context.user_data["current_order"]
     await update.message.reply_text(f"📸 رسید سفارش #{oid} را ارسال کنید:", reply_markup=user_input_cancel_menu())
@@ -298,7 +307,8 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_photo(ADMIN_CHAT_ID, photo=update.message.photo[-1].file_id, caption=caption)
     else:
         await context.bot.send_message(ADMIN_CHAT_ID, text=f"{caption}\n📝 {update.message.text}")
-    await update.message.reply_text("✅ رسید ارسال شد.", reply_markup=main_menu())
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
+    await update.message.reply_text("✅ رسید ارسال شد.", reply_markup=main_menu(is_admin))
     context.user_data.clear()
 
 async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -307,24 +317,28 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT id, status, price, discount_code, discount_amount FROM orders WHERE user_id=?", (update.effective_user.id,))
     rows = c.fetchall()
     conn.close()
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
     if not rows:
-        await update.message.reply_text("📭 سفارشی ندارید.", reply_markup=main_menu())
+        await update.message.reply_text("📭 سفارشی ندارید.", reply_markup=main_menu(is_admin))
         return
     status_map = {"pending": "⏳در انتظار", "paid": "✅پرداخت شده", "delivered": "📦تحویل شده", "cancelled": "❌لغو شده"}
     msg = "📦 سفارش‌های شما:\n\n"
     for r in rows:
         disc = f" (تخفیف:{r[4]:,})" if r[3] else ""
         msg += f"#{r[0]} | {r[2]:,}ت{disc} | {status_map.get(r[1],r[1])}\n"
-    await update.message.reply_text(msg, reply_markup=main_menu())
+    await update.message.reply_text(msg, reply_markup=main_menu(is_admin))
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(config["ABOUT_TEXT"], reply_markup=main_menu())
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
+    await update.message.reply_text(config["ABOUT_TEXT"], reply_markup=main_menu(is_admin))
 
 async def rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(config["RULES_TEXT"], reply_markup=main_menu())
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
+    await update.message.reply_text(config["RULES_TEXT"], reply_markup=main_menu(is_admin))
 
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(config["SUPPORT_TEXT"], reply_markup=main_menu())
+    is_admin = update.effective_user.id == ADMIN_CHAT_ID
+    await update.message.reply_text(config["SUPPORT_TEXT"], reply_markup=main_menu(is_admin))
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID:
@@ -338,11 +352,15 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "بازگشت به منوی اصلی":
         context.user_data.clear()
-        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
+        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu(True))
         return
     if text == "🏠 منوی اصلی":
         context.user_data.clear()
-        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
+        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu(True))
+        return
+    if text == "👑 پنل مدیریت":
+        context.user_data.clear()
+        await update.message.reply_text("👑 پنل ادمین", reply_markup=admin_menu())
         return
     if text == "❌ انصراف":
         mode = context.user_data.get("mode")
@@ -685,7 +703,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "❌ انصراف و بازگشت":
         context.user_data.clear()
-        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
+        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu(False))
         return
     if await handle_discount_code_input(update, context): return
     if "waiting_receipt" in context.user_data:

@@ -147,7 +147,8 @@ def discount_menu():
     return ReplyKeyboardMarkup(
         [["➕ افزودن کد تخفیف", "📋 لیست کدهای تخفیف"],
          ["❌ غیرفعال کردن کد", "🗑️ حذف کد تخفیف"],
-         ["📊 آمار استفاده کد", "بازگشت"]],
+         ["📊 آمار استفاده کد"],
+         ["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]],
         resize_keyboard=True
     )
 
@@ -157,7 +158,14 @@ def settings_menu():
          ["💳 تنظیم شماره کارت", "ℹ️ تنظیم درباره محصول"],
          ["📜 تنظیم قوانین", "📞 تنظیم پشتیبانی"],
          ["⏰ تنظیم زمان لغو سفارش (دقیقه)"],
-         ["بازگشت"]],
+         ["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]],
+        resize_keyboard=True
+    )
+
+def input_cancel_menu():
+    """منوی لغو عملیات در حال انجام"""
+    return ReplyKeyboardMarkup(
+        [["❌ انصراف"]],
         resize_keyboard=True
     )
 
@@ -285,13 +293,20 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=buy_menu()
     )
 
+def user_input_cancel_menu():
+    """منوی لغو عملیات برای کاربر"""
+    return ReplyKeyboardMarkup(
+        [["❌ انصراف و بازگشت"]],
+        resize_keyboard=True
+    )
+
 async def buy_with_discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """خرید با کد تخفیف"""
     if not context.user_data.get("buying"):
         await update.message.reply_text("لطفاً ابتدا روی خرید اکانت کلیک کنید.", reply_markup=main_menu())
         return
     context.user_data["waiting_discount_code"] = True
-    await update.message.reply_text("🎟️ لطفاً کد تخفیف خود را وارد کنید:")
+    await update.message.reply_text("🎟️ لطفاً کد تخفیف خود را وارد کنید:", reply_markup=user_input_cancel_menu())
 
 async def buy_without_discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """خرید بدون کد تخفیف"""
@@ -357,6 +372,12 @@ async def handle_discount_code_input(update: Update, context: ContextTypes.DEFAU
     user = update.effective_user
     code = update.message.text.strip()
     
+    # بررسی انصراف
+    if code == "❌ انصراف و بازگشت":
+        context.user_data.clear()
+        await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
+        return True
+    
     discount_info, error = validate_discount_code(code, user.id)
     
     if error:
@@ -391,12 +412,19 @@ async def back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
 
+def receipt_input_menu():
+    """منوی ارسال رسید"""
+    return ReplyKeyboardMarkup(
+        [["❌ انصراف و بازگشت"]],
+        resize_keyboard=True
+    )
+
 async def handle_receipt_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "current_order" not in context.user_data:
         await update.message.reply_text("⛔ هیچ سفارشی در حال انتظار نیست.", reply_markup=main_menu())
         return
     oid = context.user_data["current_order"]
-    await update.message.reply_text(f"📸 لطفاً تصویر یا متن رسید پرداخت سفارش #{oid} را ارسال کنید:")
+    await update.message.reply_text(f"📸 لطفاً تصویر یا متن رسید پرداخت سفارش #{oid} را ارسال کنید:", reply_markup=receipt_input_menu())
     context.user_data["waiting_receipt"] = oid
 
 async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -474,9 +502,29 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "discount"
         return
 
+    # دکمه منوی اصلی از همه جا
+    if text == "🏠 منوی اصلی":
+        context.user_data.clear()
+        await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
+        return
+
+    # دکمه انصراف در حین ورود اطلاعات
+    if text == "❌ انصراف":
+        mode = context.user_data.get("mode")
+        context.user_data.clear()
+        if mode in ["discount", "settings"]:
+            context.user_data["mode"] = mode
+            if mode == "discount":
+                await update.message.reply_text("عملیات لغو شد.", reply_markup=discount_menu())
+            else:
+                await update.message.reply_text("عملیات لغو شد.", reply_markup=settings_menu())
+        else:
+            await update.message.reply_text("عملیات لغو شد.", reply_markup=admin_menu())
+        return
+
     if context.user_data.get("mode") == "discount":
         # بازگشت از منوی تخفیف
-        if text == "بازگشت":
+        if text == "🔙 بازگشت به پنل ادمین":
             context.user_data.clear()
             await update.message.reply_text("بازگشت به پنل ادمین.", reply_markup=admin_menu())
             return
@@ -495,7 +543,8 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "(20% تخفیف، 100 بار کلی، 1 بار برای هر کاربر، 30 روز اعتبار)\n\n"
                 "مثال مبلغی:\n`OFF50K|amount|50000|0|2|0`\n"
                 "(50,000 تومان تخفیف، نامحدود کلی، 2 بار برای هر کاربر، بدون انقضا)",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=input_cancel_menu()
             )
             context.user_data["discount_action"] = "add"
             return
@@ -531,13 +580,13 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # غیرفعال کردن کد
         if text == "❌ غیرفعال کردن کد":
-            await update.message.reply_text("🎟️ کد تخفیف مورد نظر برای غیرفعال کردن را وارد کنید:")
+            await update.message.reply_text("🎟️ کد تخفیف مورد نظر برای غیرفعال کردن را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "deactivate"
             return
 
         # آمار استفاده کد
         if text == "📊 آمار استفاده کد":
-            await update.message.reply_text("🎟️ کد تخفیف مورد نظر برای مشاهده آمار را وارد کنید:")
+            await update.message.reply_text("🎟️ کد تخفیف مورد نظر برای مشاهده آمار را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "stats"
             return
 
@@ -561,7 +610,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg += f"{status} {code_text} | {type_text}\n"
             
             msg += "\n🎟️ کد تخفیف مورد نظر برای حذف را وارد کنید:"
-            await update.message.reply_text(msg, reply_markup=discount_menu())
+            await update.message.reply_text(msg, reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "delete"
             return
 
@@ -714,36 +763,36 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if context.user_data.get("mode") == "settings":
         # بازگشت از تنظیمات
-        if text == "بازگشت":
+        if text == "🔙 بازگشت به پنل ادمین":
             context.user_data.clear()
             await update.message.reply_text("بازگشت به پنل ادمین.", reply_markup=admin_menu())
             return
         if text == "🛒 تنظیم نام محصول":
-            await update.message.reply_text("نام جدید محصول را وارد کنید:")
+            await update.message.reply_text("نام جدید محصول را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "PRODUCT_NAME"
             return
         if text == "💰 تنظیم قیمت محصول":
-            await update.message.reply_text("قیمت جدید محصول را وارد کنید (به تومان):")
+            await update.message.reply_text("قیمت جدید محصول را وارد کنید (به تومان):", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "PRODUCT_PRICE"
             return
         if text == "💳 تنظیم شماره کارت":
-            await update.message.reply_text("شماره کارت جدید را وارد کنید:")
+            await update.message.reply_text("شماره کارت جدید را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "CARD_NUMBER"
             return
         if text == "ℹ️ تنظیم درباره محصول":
-            await update.message.reply_text("متن جدید درباره محصول را وارد کنید:")
+            await update.message.reply_text("متن جدید درباره محصول را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "ABOUT_TEXT"
             return
         if text == "📜 تنظیم قوانین":
-            await update.message.reply_text("متن جدید قوانین را وارد کنید:")
+            await update.message.reply_text("متن جدید قوانین را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "RULES_TEXT"
             return
         if text == "📞 تنظیم پشتیبانی":
-            await update.message.reply_text("متن جدید پشتیبانی را وارد کنید:")
+            await update.message.reply_text("متن جدید پشتیبانی را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "SUPPORT_TEXT"
             return
         if text == "⏰ تنظیم زمان لغو سفارش (دقیقه)":
-            await update.message.reply_text("زمان جدید لغو سفارش (دقیقه) را وارد کنید:")
+            await update.message.reply_text("زمان جدید لغو سفارش (دقیقه) را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["setting"] = "CANCEL_TIME_MINUTES"
             return
 
@@ -766,7 +815,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ===== تایید پرداخت =====
     if text == "✅ تایید پرداخت":
-        await update.message.reply_text("🔢 شماره سفارش را برای تایید پرداخت وارد کنید:")
+        await update.message.reply_text("🔢 شماره سفارش را برای تایید پرداخت وارد کنید:", reply_markup=input_cancel_menu())
         context.user_data["mode"] = "confirm_payment"
         return
 
@@ -816,7 +865,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ===== ارسال اکانت =====
     if text == "📤 ارسال اکانت":
-        await update.message.reply_text("🔢 شماره سفارش را برای ارسال اکانت وارد کنید:")
+        await update.message.reply_text("🔢 شماره سفارش را برای ارسال اکانت وارد کنید:", reply_markup=input_cancel_menu())
         context.user_data["mode"] = "send_account_order"
         return
 
@@ -840,7 +889,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["mode"] = "send_account_data"
             context.user_data["order_id"] = order_id
             context.user_data["user_id"] = user_id
-            await update.message.reply_text("📧 اکانت را به فرمت email | password ارسال کنید:")
+            await update.message.reply_text("📧 اکانت را به فرمت email | password ارسال کنید:", reply_markup=input_cancel_menu())
             return
         except ValueError:
             await update.message.reply_text("❌ لطفاً شماره سفارش معتبر وارد کنید.", reply_markup=admin_menu())
@@ -896,9 +945,16 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """هندلر متن برای کاربران عادی"""
     user = update.effective_user
+    text = update.message.text
     
     # اگر ادمین است، نادیده بگیر (admin_action هندل می‌کند)
     if user.id == ADMIN_CHAT_ID:
+        return
+    
+    # بررسی دکمه انصراف
+    if text == "❌ انصراف و بازگشت":
+        context.user_data.clear()
+        await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
         return
     
     # بررسی کد تخفیف

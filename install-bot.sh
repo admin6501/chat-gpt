@@ -1,19 +1,48 @@
 #!/bin/bash
 set -e
 
-echo "🚀 شروع نصب و راه‌اندازی ربات فروش ChatGPT با Docker ..."
-
-if ! command -v docker &> /dev/null; then
-    echo "📦 نصب Docker ..."
-    curl -fsSL https://get.docker.com | sh
-    sudo systemctl start docker
-    sudo systemctl enable docker
-    echo "✅ Docker نصب شد."
-fi
-
 BOT_DIR="chatgpt-seller-bot"
-mkdir -p $BOT_DIR
-cd $BOT_DIR
+BACKUP_DIR="backups"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+show_menu() {
+    clear
+    echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${NC}    ${GREEN}🤖 مدیریت ربات فروش ChatGPT${NC}            ${BLUE}║${NC}"
+    echo -e "${BLUE}╠════════════════════════════════════════════╣${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}1)${NC} 📦 نصب ربات                            ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}2)${NC} 🔄 آپدیت ربات                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}3)${NC} ▶️  استارت ربات                          ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}4)${NC} 🔁 ری‌استارت ربات                        ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}5)${NC} ⏹️  استاپ ربات                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}6)${NC} 💾 بکاپ گرفتن                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}7)${NC} 📋 مشاهده لاگ                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}8)${NC} 📊 وضعیت ربات                           ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${YELLOW}0)${NC} 🚪 خروج                                 ${BLUE}║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+install_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}📦 در حال نصب Docker...${NC}"
+        curl -fsSL https://get.docker.com | sh
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        echo -e "${GREEN}✅ Docker نصب شد.${NC}"
+    else
+        echo -e "${GREEN}✅ Docker از قبل نصب است.${NC}"
+    fi
+}
+
+create_bot_files() {
+    mkdir -p $BOT_DIR
+    cd $BOT_DIR
 
 cat > bot.py << 'PYEOF'
 #!/usr/bin/env python3
@@ -31,7 +60,6 @@ IRAN_TZ = ZoneInfo("Asia/Tehran")
 
 def setup_config():
     if not os.path.exists(CONFIG_FILE):
-        print("⚙️ تنظیم اولیه ربات:")
         token = os.environ.get("BOT_TOKEN") or input("توکن ربات: ").strip()
         admin_id = os.environ.get("ADMIN_ID") or input("آیدی عددی ادمین: ").strip()
         cfg = {
@@ -49,7 +77,6 @@ def setup_config():
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
-        print("✅ فایل config.json ساخته شد.")
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -71,90 +98,42 @@ def init_db():
     c.execute("""
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        username TEXT,
-        fullname TEXT,
-        price INTEGER,
-        original_price INTEGER,
-        discount_code TEXT,
-        discount_amount INTEGER DEFAULT 0,
-        status TEXT,
-        created_at TEXT,
-        receipt TEXT
-    )
-    """)
+        user_id INTEGER, username TEXT, fullname TEXT, price INTEGER,
+        original_price INTEGER, discount_code TEXT, discount_amount INTEGER DEFAULT 0,
+        status TEXT, created_at TEXT, receipt TEXT
+    )""")
     c.execute("""
     CREATE TABLE IF NOT EXISTS discount_codes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT UNIQUE,
-        discount_type TEXT,
-        discount_value INTEGER,
-        max_usage_total INTEGER DEFAULT 0,
-        max_usage_per_user INTEGER DEFAULT 0,
-        expires_at TEXT,
-        is_active INTEGER DEFAULT 1,
-        created_at TEXT
-    )
-    """)
+        code TEXT UNIQUE, discount_type TEXT, discount_value INTEGER,
+        max_usage_total INTEGER DEFAULT 0, max_usage_per_user INTEGER DEFAULT 0,
+        expires_at TEXT, is_active INTEGER DEFAULT 1, created_at TEXT
+    )""")
     c.execute("""
     CREATE TABLE IF NOT EXISTS discount_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT,
-        user_id INTEGER,
-        order_id INTEGER,
-        used_at TEXT
-    )
-    """)
+        code TEXT, user_id INTEGER, order_id INTEGER, used_at TEXT
+    )""")
     conn.commit()
     conn.close()
 
 def main_menu():
-    return ReplyKeyboardMarkup(
-        [["🛒 خرید اکانت", "📦 سفارش‌های من"],
-         ["ℹ️ درباره محصول", "📜 قوانین"],
-         ["📞 پشتیبانی"]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup([["🛒 خرید اکانت", "📦 سفارش‌های من"],["ℹ️ درباره محصول", "📜 قوانین"],["📞 پشتیبانی"]], resize_keyboard=True)
 
 def after_order_menu():
-    return ReplyKeyboardMarkup(
-        [["📤 ارسال رسید پرداخت"], ["🔙 بازگشت به منوی اصلی"]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup([["📤 ارسال رسید پرداخت"], ["🔙 بازگشت به منوی اصلی"]], resize_keyboard=True)
 
 def buy_menu():
-    return ReplyKeyboardMarkup(
-        [["🎟️ دارم کد تخفیف", "❌ بدون کد تخفیف"],
-         ["🔙 بازگشت به منوی اصلی"]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup([["🎟️ دارم کد تخفیف", "❌ بدون کد تخفیف"],["🔙 بازگشت به منوی اصلی"]], resize_keyboard=True)
 
 def admin_menu():
-    return ReplyKeyboardMarkup(
-        [["📋 سفارش‌های در انتظار", "✅ تایید پرداخت"],
-         ["📤 ارسال اکانت", "🎟️ مدیریت کد تخفیف"],
-         ["⚙️ تنظیمات فروشگاه", "بازگشت به منوی اصلی"]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup([["📋 سفارش‌های در انتظار", "✅ تایید پرداخت"],["📤 ارسال اکانت", "🎟️ مدیریت کد تخفیف"],["⚙️ تنظیمات فروشگاه", "بازگشت به منوی اصلی"]], resize_keyboard=True)
 
 def discount_menu():
-    return ReplyKeyboardMarkup(
-        [["➕ افزودن کد تخفیف", "📋 لیست کدهای تخفیف"],
-         ["❌ غیرفعال کردن کد", "🗑️ حذف کد تخفیف"],
-         ["📊 آمار استفاده کد"],
-         ["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup([["➕ افزودن کد تخفیف", "📋 لیست کدهای تخفیف"],["❌ غیرفعال کردن کد", "🗑️ حذف کد تخفیف"],["📊 آمار استفاده کد"],["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]], resize_keyboard=True)
 
 def settings_menu():
-    return ReplyKeyboardMarkup(
-        [["🛒 تنظیم نام محصول", "💰 تنظیم قیمت محصول"],
-         ["💳 تنظیم شماره کارت", "ℹ️ تنظیم درباره محصول"],
-         ["📜 تنظیم قوانین", "📞 تنظیم پشتیبانی"],
-         ["⏰ زمان لغو سفارش", "🔄 بازه چک سفارش‌ها"],
-         ["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup([["🛒 تنظیم نام محصول", "💰 تنظیم قیمت محصول"],["💳 تنظیم شماره کارت", "ℹ️ تنظیم درباره محصول"],["📜 تنظیم قوانین", "📞 تنظیم پشتیبانی"],["⏰ زمان لغو سفارش", "🔄 بازه چک سفارش‌ها"],["🔙 بازگشت به پنل ادمین", "🏠 منوی اصلی"]], resize_keyboard=True)
 
 def input_cancel_menu():
     return ReplyKeyboardMarkup([["❌ انصراف"]], resize_keyboard=True)
@@ -172,20 +151,17 @@ def validate_discount_code(code, user_id):
         return None, "❌ کد تخفیف نامعتبر یا غیرفعال است."
     code_id, code_text, discount_type, discount_value, max_total, max_per_user, expires_at, is_active, created_at = discount
     if expires_at:
-        expire_time = datetime.fromisoformat(expires_at)
-        if datetime.now(IRAN_TZ) > expire_time:
+        if datetime.now(IRAN_TZ) > datetime.fromisoformat(expires_at):
             conn.close()
             return None, "❌ کد تخفیف منقضی شده است."
     if max_total > 0:
         c.execute("SELECT COUNT(*) FROM discount_usage WHERE code=?", (code.upper(),))
-        total_used = c.fetchone()[0]
-        if total_used >= max_total:
+        if c.fetchone()[0] >= max_total:
             conn.close()
             return None, "❌ ظرفیت استفاده از این کد تکمیل شده است."
     if max_per_user > 0:
         c.execute("SELECT COUNT(*) FROM discount_usage WHERE code=? AND user_id=?", (code.upper(), user_id))
-        user_used = c.fetchone()[0]
-        if user_used >= max_per_user:
+        if c.fetchone()[0] >= max_per_user:
             conn.close()
             return None, "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید."
     conn.close()
@@ -196,8 +172,7 @@ def calculate_discounted_price(original_price, discount_info):
         discount_amount = int(original_price * discount_info["value"] / 100)
     else:
         discount_amount = discount_info["value"]
-    final_price = max(0, original_price - discount_amount)
-    return final_price, discount_amount
+    return max(0, original_price - discount_amount), discount_amount
 
 def record_discount_usage(code, user_id, order_id):
     conn = sqlite3.connect(DB_FILE)
@@ -212,36 +187,24 @@ async def cancel_expired_orders(context: ContextTypes.DEFAULT_TYPE):
     cutoff_time = datetime.now(IRAN_TZ) - timedelta(minutes=cancel_minutes)
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT id, user_id, fullname FROM orders WHERE status='pending' AND receipt IS NULL AND created_at < ?",
-              (cutoff_time.isoformat(),))
-    expired_orders = c.fetchall()
-    for order in expired_orders:
-        order_id, user_id, fullname = order
+    c.execute("SELECT id, user_id, fullname FROM orders WHERE status='pending' AND receipt IS NULL AND created_at < ?", (cutoff_time.isoformat(),))
+    for order_id, user_id, fullname in c.fetchall():
         c.execute("UPDATE orders SET status='cancelled' WHERE id=?", (order_id,))
-        logger.info(f"Order #{order_id} cancelled")
         try:
-            await context.bot.send_message(user_id, f"⛔ سفارش #{order_id} شما به دلیل عدم ارسال رسید پرداخت در مدت {cancel_minutes} دقیقه لغو شد.")
-        except Exception as e:
-            logger.error(f"Error notifying user: {e}")
+            await context.bot.send_message(user_id, f"⛔ سفارش #{order_id} شما به دلیل عدم ارسال رسید در مدت {cancel_minutes} دقیقه لغو شد.")
+        except: pass
         try:
-            await context.bot.send_message(ADMIN_CHAT_ID, f"🔴 سفارش #{order_id} ({fullname}) به دلیل عدم پرداخت لغو شد.")
-        except Exception as e:
-            logger.error(f"Error notifying admin: {e}")
+            await context.bot.send_message(ADMIN_CHAT_ID, f"🔴 سفارش #{order_id} ({fullname}) لغو شد.")
+        except: pass
     conn.commit()
     conn.close()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"👋 خوش آمدید!\n🛍️ {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان",
-        reply_markup=main_menu()
-    )
+    await update.message.reply_text(f"👋 خوش آمدید!\n🛍️ {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان", reply_markup=main_menu())
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["buying"] = True
-    await update.message.reply_text(
-        f"🛒 خرید {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان\n\n🎟️ آیا کد تخفیف دارید؟",
-        reply_markup=buy_menu()
-    )
+    await update.message.reply_text(f"🛒 خرید {config['PRODUCT_NAME']}\n💰 قیمت: {config['PRODUCT_PRICE']:,} تومان\n\n🎟️ آیا کد تخفیف دارید؟", reply_markup=buy_menu())
 
 async def buy_with_discount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("buying"):
@@ -258,19 +221,16 @@ async def buy_without_discount(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, discount_info):
     user = update.effective_user
-    now = datetime.now(IRAN_TZ).isoformat()
     original_price = config['PRODUCT_PRICE']
     if discount_info:
         final_price, discount_amount = calculate_discounted_price(original_price, discount_info)
         discount_code = discount_info["code"]
     else:
-        final_price = original_price
-        discount_amount = 0
-        discount_code = None
+        final_price, discount_amount, discount_code = original_price, 0, None
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("INSERT INTO orders (user_id, username, fullname, price, original_price, discount_code, discount_amount, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-              (user.id, user.username, user.full_name, final_price, original_price, discount_code, discount_amount, "pending", now))
+              (user.id, user.username, user.full_name, final_price, original_price, discount_code, discount_amount, "pending", datetime.now(IRAN_TZ).isoformat()))
     conn.commit()
     oid = c.lastrowid
     conn.close()
@@ -278,13 +238,13 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, disc
         record_discount_usage(discount_code, user.id, oid)
     admin_msg = f"🆕 سفارش جدید:\n👤 {user.full_name} (@{user.username})\n🆔 #{oid}\n"
     if discount_code:
-        admin_msg += f"🎟️ کد تخفیف: {discount_code}\n💰 قیمت اصلی: {original_price:,} تومان\n💸 تخفیف: {discount_amount:,} تومان\n"
-    admin_msg += f"💵 قیمت نهایی: {final_price:,} تومان"
+        admin_msg += f"🎟️ کد: {discount_code}\n💰 اصلی: {original_price:,}\n💸 تخفیف: {discount_amount:,}\n"
+    admin_msg += f"💵 نهایی: {final_price:,} تومان"
     await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
     user_msg = f"✅ سفارش #{oid} ثبت شد.\n"
     if discount_code:
-        user_msg += f"🎟️ کد تخفیف: {discount_code}\n💰 قیمت اصلی: {original_price:,} تومان\n💸 تخفیف: {discount_amount:,} تومان\n"
-    user_msg += f"💵 مبلغ قابل پرداخت: {final_price:,} تومان\n\n💳 شماره کارت:\n{config['CARD_NUMBER']}\n\nپس از پرداخت، رسید خود را ارسال کنید.\n⏰ زمان پرداخت: {config['CANCEL_TIME_MINUTES']} دقیقه"
+        user_msg += f"🎟️ کد: {discount_code}\n💰 اصلی: {original_price:,}\n💸 تخفیف: {discount_amount:,}\n"
+    user_msg += f"💵 مبلغ: {final_price:,} تومان\n\n💳 شماره کارت:\n{config['CARD_NUMBER']}\n\n⏰ زمان پرداخت: {config['CANCEL_TIME_MINUTES']} دقیقه"
     await update.message.reply_text(user_msg, reply_markup=after_order_menu())
     context.user_data.clear()
     context.user_data["current_order"] = oid
@@ -292,28 +252,20 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, disc
 async def handle_discount_code_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("waiting_discount_code"):
         return False
-    user = update.effective_user
     code = update.message.text.strip()
     if code == "❌ انصراف و بازگشت":
         context.user_data.clear()
         await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
         return True
-    discount_info, error = validate_discount_code(code, user.id)
+    discount_info, error = validate_discount_code(code, update.effective_user.id)
     if error:
         await update.message.reply_text(error, reply_markup=buy_menu())
         context.user_data["waiting_discount_code"] = False
         return True
     original_price = config['PRODUCT_PRICE']
     final_price, discount_amount = calculate_discounted_price(original_price, discount_info)
-    if discount_info["type"] == "percent":
-        discount_text = f"{discount_info['value']}%"
-    else:
-        discount_text = f"{discount_info['value']:,} تومان"
-    await update.message.reply_text(
-        f"✅ کد تخفیف معتبر است!\n\n🎟️ کد: {discount_info['code']}\n💯 میزان تخفیف: {discount_text}\n"
-        f"💰 قیمت اصلی: {original_price:,} تومان\n💸 مبلغ تخفیف: {discount_amount:,} تومان\n"
-        f"💵 قیمت نهایی: {final_price:,} تومان\n\nدر حال ثبت سفارش..."
-    )
+    discount_text = f"{discount_info['value']}%" if discount_info["type"] == "percent" else f"{discount_info['value']:,} تومان"
+    await update.message.reply_text(f"✅ کد معتبر!\n🎟️ {discount_info['code']}\n💯 تخفیف: {discount_text}\n💰 اصلی: {original_price:,}\n💸 تخفیف: {discount_amount:,}\n💵 نهایی: {final_price:,}\n\nدر حال ثبت...")
     context.user_data["waiting_discount_code"] = False
     await process_order(update, context, discount_info)
     return True
@@ -324,10 +276,10 @@ async def back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_receipt_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "current_order" not in context.user_data:
-        await update.message.reply_text("⛔ هیچ سفارشی در حال انتظار نیست.", reply_markup=main_menu())
+        await update.message.reply_text("⛔ هیچ سفارشی در انتظار نیست.", reply_markup=main_menu())
         return
     oid = context.user_data["current_order"]
-    await update.message.reply_text(f"📸 لطفاً تصویر یا متن رسید پرداخت سفارش #{oid} را ارسال کنید:", reply_markup=user_input_cancel_menu())
+    await update.message.reply_text(f"📸 رسید سفارش #{oid} را ارسال کنید:", reply_markup=user_input_cancel_menu())
     context.user_data["waiting_receipt"] = oid
 
 async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -335,7 +287,7 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user = update.effective_user
     oid = context.user_data["waiting_receipt"]
-    caption = f"📩 رسید پرداخت سفارش #{oid}\n👤 {user.full_name} (@{user.username})"
+    caption = f"📩 رسید سفارش #{oid}\n👤 {user.full_name} (@{user.username})"
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("UPDATE orders SET receipt=? WHERE id=?", ("sent", oid))
@@ -344,28 +296,24 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
         await context.bot.send_photo(ADMIN_CHAT_ID, photo=update.message.photo[-1].file_id, caption=caption)
     else:
-        await context.bot.send_message(ADMIN_CHAT_ID, text=f"{caption}\n📝 متن رسید:\n{update.message.text}")
-    await update.message.reply_text("✅ رسید پرداخت شما ارسال شد و در انتظار تایید است.", reply_markup=main_menu())
+        await context.bot.send_message(ADMIN_CHAT_ID, text=f"{caption}\n📝 متن:\n{update.message.text}")
+    await update.message.reply_text("✅ رسید ارسال شد.", reply_markup=main_menu())
     context.user_data.clear()
 
 async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT id, status, price, original_price, discount_code, discount_amount FROM orders WHERE user_id=?", (user.id,))
+    c.execute("SELECT id, status, price, discount_code, discount_amount FROM orders WHERE user_id=?", (update.effective_user.id,))
     rows = c.fetchall()
     conn.close()
     if not rows:
-        await update.message.reply_text("📭 شما هیچ سفارشی ندارید.", reply_markup=main_menu())
+        await update.message.reply_text("📭 سفارشی ندارید.", reply_markup=main_menu())
         return
+    status_map = {"pending": "در انتظار", "paid": "پرداخت شده", "delivered": "تحویل شده", "cancelled": "لغو شده"}
     msg = "📦 سفارش‌های شما:\n"
-    status_map = {"pending": "در انتظار", "paid": "پرداخت شده", "delivered": "تحویل داده شده", "cancelled": "لغو شده"}
     for r in rows:
-        status_text = status_map.get(r[1], r[1])
-        discount_info = ""
-        if r[4]:
-            discount_info = f" | تخفیف: {r[5]:,}"
-        msg += f"#{r[0]} | {r[2]:,} تومان{discount_info} | {status_text}\n"
+        discount = f" | تخفیف: {r[4]:,}" if r[3] else ""
+        msg += f"#{r[0]} | {r[2]:,}ت{discount} | {status_map.get(r[1], r[1])}\n"
     await update.message.reply_text(msg, reply_markup=main_menu())
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -381,7 +329,7 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID:
         await update.message.reply_text("⛔ شما ادمین نیستید.")
         return
-    await update.message.reply_text("👑 پنل ادمین فعال شد.", reply_markup=admin_menu())
+    await update.message.reply_text("👑 پنل ادمین", reply_markup=admin_menu())
 
 async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID:
@@ -390,54 +338,38 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "بازگشت به منوی اصلی":
         context.user_data.clear()
-        await update.message.reply_text("بازگشت به منوی کاربران.", reply_markup=main_menu())
+        await update.message.reply_text("بازگشت.", reply_markup=main_menu())
         return
-
-    if text == "🎟️ مدیریت کد تخفیف":
-        await update.message.reply_text("🎟️ مدیریت کدهای تخفیف:", reply_markup=discount_menu())
-        context.user_data["mode"] = "discount"
-        return
-
     if text == "🏠 منوی اصلی":
         context.user_data.clear()
-        await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
+        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
         return
-
     if text == "❌ انصراف":
         mode = context.user_data.get("mode")
         context.user_data.clear()
-        if mode in ["discount", "settings"]:
-            context.user_data["mode"] = mode
-            if mode == "discount":
-                await update.message.reply_text("عملیات لغو شد.", reply_markup=discount_menu())
-            else:
-                await update.message.reply_text("عملیات لغو شد.", reply_markup=settings_menu())
+        if mode == "discount":
+            context.user_data["mode"] = "discount"
+            await update.message.reply_text("لغو شد.", reply_markup=discount_menu())
+        elif mode == "settings":
+            context.user_data["mode"] = "settings"
+            await update.message.reply_text("لغو شد.", reply_markup=settings_menu())
         else:
-            await update.message.reply_text("عملیات لغو شد.", reply_markup=admin_menu())
+            await update.message.reply_text("لغو شد.", reply_markup=admin_menu())
+        return
+    if text == "🎟️ مدیریت کد تخفیف":
+        context.user_data["mode"] = "discount"
+        await update.message.reply_text("🎟️ مدیریت کد تخفیف:", reply_markup=discount_menu())
         return
 
     if context.user_data.get("mode") == "discount":
         if text == "🔙 بازگشت به پنل ادمین":
             context.user_data.clear()
-            await update.message.reply_text("بازگشت به پنل ادمین.", reply_markup=admin_menu())
+            await update.message.reply_text("پنل ادمین", reply_markup=admin_menu())
             return
-
         if text == "➕ افزودن کد تخفیف":
-            await update.message.reply_text(
-                "🎟️ برای افزودن کد تخفیف، اطلاعات را به فرمت زیر وارد کنید:\n\n"
-                "```\nکد|نوع|مقدار|حداکثر_کل|حداکثر_هرکاربر|انقضا\n```\n\n"
-                "📌 نوع: `percent` (درصدی) یا `amount` (مبلغی)\n"
-                "📌 مقدار: عدد (درصد یا مبلغ به تومان)\n"
-                "📌 حداکثر_کل: تعداد کل استفاده (0 = نامحدود)\n"
-                "📌 حداکثر_هرکاربر: تعداد استفاده هر کاربر (0 = نامحدود)\n"
-                "📌 انقضا: تعداد روز تا انقضا (0 = بدون انقضا)\n\n"
-                "مثال درصدی:\n`SALE20|percent|20|100|1|30`\n\n"
-                "مثال مبلغی:\n`OFF50K|amount|50000|0|2|0`",
-                parse_mode="Markdown", reply_markup=input_cancel_menu()
-            )
+            await update.message.reply_text("فرمت:\n`کد|نوع|مقدار|حداکثر_کل|حداکثر_هرکاربر|روز_انقضا`\n\nنوع: percent یا amount\n0 = نامحدود\n\nمثال:\n`SALE20|percent|20|100|1|30`", parse_mode="Markdown", reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "add"
             return
-
         if text == "📋 لیست کدهای تخفیف":
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
@@ -445,317 +377,213 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             codes = c.fetchall()
             conn.close()
             if not codes:
-                await update.message.reply_text("📭 هیچ کد تخفیفی وجود ندارد.", reply_markup=discount_menu())
+                await update.message.reply_text("📭 کدی وجود ندارد.", reply_markup=discount_menu())
                 return
-            msg = "📋 لیست کدهای تخفیف:\n\n"
-            for code in codes:
-                code_text, dtype, dvalue, max_total, max_per_user, expires, is_active = code
-                type_text = f"{dvalue}%" if dtype == "percent" else f"{dvalue:,} تومان"
-                status = "✅ فعال" if is_active else "❌ غیرفعال"
-                expire_text = expires[:10] if expires else "بدون انقضا"
-                max_total_text = str(max_total) if max_total > 0 else "∞"
-                max_per_user_text = str(max_per_user) if max_per_user > 0 else "∞"
-                msg += f"🎟️ {code_text}\n   💯 {type_text} | {status}\n   📊 کل: {max_total_text} | هرکاربر: {max_per_user_text}\n   📅 انقضا: {expire_text}\n\n"
+            msg = "📋 کدهای تخفیف:\n\n"
+            for cd in codes:
+                t = f"{cd[2]}%" if cd[1] == "percent" else f"{cd[2]:,}ت"
+                s = "✅" if cd[6] else "❌"
+                e = cd[5][:10] if cd[5] else "∞"
+                msg += f"{s} {cd[0]} | {t} | کل:{cd[3] or '∞'} | هرکاربر:{cd[4] or '∞'} | انقضا:{e}\n"
             await update.message.reply_text(msg, reply_markup=discount_menu())
             return
-
         if text == "❌ غیرفعال کردن کد":
-            await update.message.reply_text("🎟️ کد تخفیف مورد نظر برای غیرفعال کردن را وارد کنید:", reply_markup=input_cancel_menu())
+            await update.message.reply_text("کد را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "deactivate"
             return
-
         if text == "📊 آمار استفاده کد":
-            await update.message.reply_text("🎟️ کد تخفیف مورد نظر برای مشاهده آمار را وارد کنید:", reply_markup=input_cancel_menu())
+            await update.message.reply_text("کد را وارد کنید:", reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "stats"
             return
-
         if text == "🗑️ حذف کد تخفیف":
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("SELECT code, discount_type, discount_value, is_active FROM discount_codes ORDER BY id DESC")
+            c.execute("SELECT code, discount_type, discount_value, is_active FROM discount_codes")
             codes = c.fetchall()
             conn.close()
             if not codes:
-                await update.message.reply_text("📭 هیچ کد تخفیفی برای حذف وجود ندارد.", reply_markup=discount_menu())
+                await update.message.reply_text("📭 کدی وجود ندارد.", reply_markup=discount_menu())
                 return
-            msg = "🗑️ لیست کدهای تخفیف برای حذف:\n\n"
-            for code in codes:
-                code_text, dtype, dvalue, is_active = code
-                type_text = f"{dvalue}%" if dtype == "percent" else f"{dvalue:,} تومان"
-                status = "✅" if is_active else "❌"
-                msg += f"{status} {code_text} | {type_text}\n"
-            msg += "\n🎟️ کد تخفیف مورد نظر برای حذف را وارد کنید:"
+            msg = "🗑️ کدها:\n"
+            for cd in codes:
+                s = "✅" if cd[3] else "❌"
+                t = f"{cd[2]}%" if cd[1] == "percent" else f"{cd[2]:,}ت"
+                msg += f"{s} {cd[0]} | {t}\n"
+            msg += "\nکد برای حذف:"
             await update.message.reply_text(msg, reply_markup=input_cancel_menu())
             context.user_data["discount_action"] = "delete"
             return
 
         if context.user_data.get("discount_action") == "add":
             try:
-                parts = text.strip().split("|")
-                if len(parts) != 6:
-                    raise ValueError("فرمت نادرست")
-                code = parts[0].upper().strip()
-                discount_type = parts[1].lower().strip()
-                discount_value = int(parts[2])
-                max_total = int(parts[3])
-                max_per_user = int(parts[4])
-                expire_days = int(parts[5])
-                if discount_type not in ["percent", "amount"]:
-                    raise ValueError("نوع تخفیف باید percent یا amount باشد")
-                if discount_type == "percent" and (discount_value < 1 or discount_value > 100):
-                    raise ValueError("درصد تخفیف باید بین 1 تا 100 باشد")
-                expires_at = None
-                if expire_days > 0:
-                    expires_at = (datetime.now(IRAN_TZ) + timedelta(days=expire_days)).isoformat()
+                parts = text.split("|")
+                if len(parts) != 6: raise ValueError()
+                code, dtype, dval, mtot, muser, days = parts[0].upper().strip(), parts[1].lower().strip(), int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5])
+                if dtype not in ["percent", "amount"]: raise ValueError()
+                if dtype == "percent" and not 1 <= dval <= 100: raise ValueError()
+                exp = (datetime.now(IRAN_TZ) + timedelta(days=days)).isoformat() if days > 0 else None
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                c.execute("INSERT INTO discount_codes (code, discount_type, discount_value, max_usage_total, max_usage_per_user, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          (code, discount_type, discount_value, max_total, max_per_user, expires_at, datetime.now(IRAN_TZ).isoformat()))
+                c.execute("INSERT INTO discount_codes (code, discount_type, discount_value, max_usage_total, max_usage_per_user, expires_at, created_at) VALUES (?,?,?,?,?,?,?)",
+                          (code, dtype, dval, mtot, muser, exp, datetime.now(IRAN_TZ).isoformat()))
                 conn.commit()
                 conn.close()
-                type_text = f"{discount_value}%" if discount_type == "percent" else f"{discount_value:,} تومان"
-                max_total_text = str(max_total) if max_total > 0 else "نامحدود"
-                max_per_user_text = str(max_per_user) if max_per_user > 0 else "نامحدود"
-                expire_text = f"{expire_days} روز" if expire_days > 0 else "بدون انقضا"
-                await update.message.reply_text(
-                    f"✅ کد تخفیف ایجاد شد!\n\n🎟️ کد: {code}\n💯 تخفیف: {type_text}\n📊 حداکثر کل: {max_total_text}\n👤 حداکثر هر کاربر: {max_per_user_text}\n📅 اعتبار: {expire_text}",
-                    reply_markup=discount_menu()
-                )
-                context.user_data["discount_action"] = None
-                return
+                await update.message.reply_text(f"✅ کد {code} ایجاد شد.", reply_markup=discount_menu())
             except sqlite3.IntegrityError:
-                await update.message.reply_text("❌ این کد تخفیف قبلاً وجود دارد.", reply_markup=discount_menu())
-                context.user_data["discount_action"] = None
-                return
-            except Exception as e:
-                await update.message.reply_text(f"❌ خطا: {str(e)}\n\nلطفاً فرمت صحیح را رعایت کنید.", reply_markup=discount_menu())
-                context.user_data["discount_action"] = None
-                return
+                await update.message.reply_text("❌ کد تکراری است.", reply_markup=discount_menu())
+            except:
+                await update.message.reply_text("❌ فرمت اشتباه.", reply_markup=discount_menu())
+            context.user_data["discount_action"] = None
+            return
 
         if context.user_data.get("discount_action") == "deactivate":
-            code = text.strip().upper()
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("UPDATE discount_codes SET is_active=0 WHERE code=?", (code,))
-            if c.rowcount > 0:
-                await update.message.reply_text(f"✅ کد تخفیف {code} غیرفعال شد.", reply_markup=discount_menu())
-            else:
-                await update.message.reply_text("❌ کد تخفیف یافت نشد.", reply_markup=discount_menu())
+            c.execute("UPDATE discount_codes SET is_active=0 WHERE code=?", (text.upper(),))
+            await update.message.reply_text("✅ غیرفعال شد." if c.rowcount else "❌ یافت نشد.", reply_markup=discount_menu())
             conn.commit()
             conn.close()
             context.user_data["discount_action"] = None
             return
 
         if context.user_data.get("discount_action") == "delete":
-            code = text.strip().upper()
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("SELECT id FROM discount_codes WHERE code=?", (code,))
-            if not c.fetchone():
-                await update.message.reply_text("❌ کد تخفیف یافت نشد.", reply_markup=discount_menu())
-                conn.close()
-                context.user_data["discount_action"] = None
-                return
-            c.execute("DELETE FROM discount_usage WHERE code=?", (code,))
-            c.execute("DELETE FROM discount_codes WHERE code=?", (code,))
+            c.execute("DELETE FROM discount_usage WHERE code=?", (text.upper(),))
+            c.execute("DELETE FROM discount_codes WHERE code=?", (text.upper(),))
+            await update.message.reply_text("🗑️ حذف شد." if c.rowcount else "❌ یافت نشد.", reply_markup=discount_menu())
             conn.commit()
             conn.close()
-            await update.message.reply_text(f"🗑️ کد تخفیف {code} و تمام سوابق استفاده آن حذف شد.", reply_markup=discount_menu())
             context.user_data["discount_action"] = None
             return
 
         if context.user_data.get("discount_action") == "stats":
-            code = text.strip().upper()
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("SELECT discount_type, discount_value, max_usage_total, max_usage_per_user FROM discount_codes WHERE code=?", (code,))
-            code_info = c.fetchone()
-            if not code_info:
-                await update.message.reply_text("❌ کد تخفیف یافت نشد.", reply_markup=discount_menu())
+            c.execute("SELECT discount_type, discount_value, max_usage_total FROM discount_codes WHERE code=?", (text.upper(),))
+            info = c.fetchone()
+            if not info:
+                await update.message.reply_text("❌ یافت نشد.", reply_markup=discount_menu())
                 conn.close()
                 context.user_data["discount_action"] = None
                 return
-            c.execute("SELECT COUNT(*) FROM discount_usage WHERE code=?", (code,))
-            total_usage = c.fetchone()[0]
-            c.execute("SELECT COUNT(DISTINCT user_id) FROM discount_usage WHERE code=?", (code,))
-            unique_users = c.fetchone()[0]
-            c.execute("SELECT SUM(discount_amount) FROM orders WHERE discount_code=?", (code,))
-            total_discount = c.fetchone()[0] or 0
+            c.execute("SELECT COUNT(*) FROM discount_usage WHERE code=?", (text.upper(),))
+            used = c.fetchone()[0]
+            c.execute("SELECT SUM(discount_amount) FROM orders WHERE discount_code=?", (text.upper(),))
+            total = c.fetchone()[0] or 0
             conn.close()
-            type_text = f"{code_info[1]}%" if code_info[0] == "percent" else f"{code_info[1]:,} تومان"
-            max_total_text = str(code_info[2]) if code_info[2] > 0 else "نامحدود"
-            await update.message.reply_text(
-                f"📊 آمار کد تخفیف {code}:\n\n💯 میزان تخفیف: {type_text}\n📈 تعداد استفاده: {total_usage} از {max_total_text}\n👥 کاربران یکتا: {unique_users}\n💰 مجموع تخفیف اعمال شده: {total_discount:,} تومان",
-                reply_markup=discount_menu()
-            )
+            t = f"{info[1]}%" if info[0] == "percent" else f"{info[1]:,}ت"
+            await update.message.reply_text(f"📊 {text.upper()}\nتخفیف: {t}\nاستفاده: {used}/{info[2] or '∞'}\nمجموع: {total:,}ت", reply_markup=discount_menu())
             context.user_data["discount_action"] = None
             return
 
     if text == "⚙️ تنظیمات فروشگاه":
-        await update.message.reply_text("🛠 تنظیمات فروشگاه:", reply_markup=settings_menu())
         context.user_data["mode"] = "settings"
+        await update.message.reply_text("⚙️ تنظیمات:", reply_markup=settings_menu())
         return
 
     if context.user_data.get("mode") == "settings":
         if text == "🔙 بازگشت به پنل ادمین":
             context.user_data.clear()
-            await update.message.reply_text("بازگشت به پنل ادمین.", reply_markup=admin_menu())
+            await update.message.reply_text("پنل ادمین", reply_markup=admin_menu())
             return
-        if text == "🛒 تنظیم نام محصول":
-            await update.message.reply_text("نام جدید محصول را وارد کنید:", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "PRODUCT_NAME"
+        settings_map = {"🛒 تنظیم نام محصول": "PRODUCT_NAME", "💰 تنظیم قیمت محصول": "PRODUCT_PRICE",
+                       "💳 تنظیم شماره کارت": "CARD_NUMBER", "ℹ️ تنظیم درباره محصول": "ABOUT_TEXT",
+                       "📜 تنظیم قوانین": "RULES_TEXT", "📞 تنظیم پشتیبانی": "SUPPORT_TEXT",
+                       "⏰ زمان لغو سفارش": "CANCEL_TIME_MINUTES", "🔄 بازه چک سفارش‌ها": "CHECK_INTERVAL_SECONDS"}
+        if text in settings_map:
+            context.user_data["setting"] = settings_map[text]
+            cur = config.get(settings_map[text], "")
+            await update.message.reply_text(f"مقدار فعلی: {cur}\n\nمقدار جدید:", reply_markup=input_cancel_menu())
             return
-        if text == "💰 تنظیم قیمت محصول":
-            await update.message.reply_text("قیمت جدید محصول را وارد کنید (به تومان):", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "PRODUCT_PRICE"
-            return
-        if text == "💳 تنظیم شماره کارت":
-            await update.message.reply_text("شماره کارت جدید را وارد کنید:", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "CARD_NUMBER"
-            return
-        if text == "ℹ️ تنظیم درباره محصول":
-            await update.message.reply_text("متن جدید درباره محصول را وارد کنید:", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "ABOUT_TEXT"
-            return
-        if text == "📜 تنظیم قوانین":
-            await update.message.reply_text("متن جدید قوانین را وارد کنید:", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "RULES_TEXT"
-            return
-        if text == "📞 تنظیم پشتیبانی":
-            await update.message.reply_text("متن جدید پشتیبانی را وارد کنید:", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "SUPPORT_TEXT"
-            return
-        if text == "⏰ زمان لغو سفارش":
-            current = config.get("CANCEL_TIME_MINUTES", 20)
-            await update.message.reply_text(f"⏰ زمان فعلی: {current} دقیقه\n\nزمان جدید لغو سفارش (به دقیقه) را وارد کنید:", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "CANCEL_TIME_MINUTES"
-            return
-        if text == "🔄 بازه چک سفارش‌ها":
-            current = config.get("CHECK_INTERVAL_SECONDS", 60)
-            await update.message.reply_text(f"🔄 بازه فعلی: {current} ثانیه\n\nبازه جدید چک سفارش‌ها (به ثانیه) را وارد کنید:\n💡 پیشنهاد: بین 30 تا 120 ثانیه", reply_markup=input_cancel_menu())
-            context.user_data["setting"] = "CHECK_INTERVAL_SECONDS"
-            return
-
         if "setting" in context.user_data:
             key = context.user_data["setting"]
-            value = text
+            val = text
             if key in ["PRODUCT_PRICE", "CANCEL_TIME_MINUTES", "CHECK_INTERVAL_SECONDS"]:
                 try:
-                    value = int(value)
-                    if value <= 0:
-                        raise ValueError()
-                    if key == "CHECK_INTERVAL_SECONDS" and value < 10:
-                        await update.message.reply_text("❌ بازه چک نباید کمتر از 10 ثانیه باشد.", reply_markup=settings_menu())
-                        context.user_data.clear()
-                        context.user_data["mode"] = "settings"
-                        return
-                except ValueError:
-                    await update.message.reply_text("❌ لطفاً مقدار عددی معتبر وارد کنید.", reply_markup=settings_menu())
+                    val = int(val)
+                    if val <= 0 or (key == "CHECK_INTERVAL_SECONDS" and val < 10): raise ValueError()
+                except:
+                    await update.message.reply_text("❌ عدد نامعتبر.", reply_markup=settings_menu())
                     context.user_data.clear()
                     context.user_data["mode"] = "settings"
                     return
-            config[key] = value
+            config[key] = val
             save_config()
-            key_names = {"PRODUCT_NAME": "نام محصول", "PRODUCT_PRICE": "قیمت محصول", "CARD_NUMBER": "شماره کارت",
-                        "ABOUT_TEXT": "درباره محصول", "RULES_TEXT": "قوانین", "SUPPORT_TEXT": "پشتیبانی",
-                        "CANCEL_TIME_MINUTES": "زمان لغو سفارش", "CHECK_INTERVAL_SECONDS": "بازه چک سفارش‌ها"}
-            key_name = key_names.get(key, key)
             context.user_data.clear()
-            await update.message.reply_text(f"✅ {key_name} با موفقیت ذخیره شد.", reply_markup=settings_menu())
+            await update.message.reply_text("✅ ذخیره شد.", reply_markup=settings_menu())
             context.user_data["mode"] = "settings"
             return
 
     if text == "✅ تایید پرداخت":
-        await update.message.reply_text("🔢 شماره سفارش را برای تایید پرداخت وارد کنید:", reply_markup=input_cancel_menu())
+        await update.message.reply_text("شماره سفارش:", reply_markup=input_cancel_menu())
         context.user_data["mode"] = "confirm_payment"
         return
 
     if context.user_data.get("mode") == "confirm_payment":
         try:
-            order_id = int(text)
+            oid = int(text)
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("SELECT user_id, status FROM orders WHERE id=?", (order_id,))
+            c.execute("SELECT user_id, status FROM orders WHERE id=?", (oid,))
             row = c.fetchone()
             if not row:
-                await update.message.reply_text("❌ سفارش یافت نشد.", reply_markup=admin_menu())
-                context.user_data.clear()
-                conn.close()
-                return
-            user_id, status = row
-            if status == "paid":
-                await update.message.reply_text("⚠️ این سفارش قبلاً تایید شده است.", reply_markup=admin_menu())
-                context.user_data.clear()
-                conn.close()
-                return
-            if status == "cancelled":
-                await update.message.reply_text("⚠️ این سفارش لغو شده است.", reply_markup=admin_menu())
-                context.user_data.clear()
-                conn.close()
-                return
-            c.execute("UPDATE orders SET status='paid' WHERE id=?", (order_id,))
-            conn.commit()
+                await update.message.reply_text("❌ یافت نشد.", reply_markup=admin_menu())
+            elif row[1] in ["paid", "cancelled"]:
+                await update.message.reply_text(f"⚠️ وضعیت: {row[1]}", reply_markup=admin_menu())
+            else:
+                c.execute("UPDATE orders SET status='paid' WHERE id=?", (oid,))
+                conn.commit()
+                try: await context.bot.send_message(row[0], f"✅ سفارش #{oid} تایید شد.")
+                except: pass
+                await update.message.reply_text(f"✅ سفارش #{oid} تایید شد.", reply_markup=admin_menu())
             conn.close()
-            try:
-                await context.bot.send_message(user_id, f"✅ پرداخت سفارش #{order_id} تایید شد.\n⏳ اکانت شما به زودی ارسال خواهد شد.")
-            except Exception as e:
-                logger.error(f"Error notifying user: {e}")
-            await update.message.reply_text(f"✅ پرداخت سفارش #{order_id} تایید شد.", reply_markup=admin_menu())
-            context.user_data.clear()
-            return
-        except ValueError:
-            await update.message.reply_text("❌ لطفاً شماره سفارش معتبر وارد کنید.", reply_markup=admin_menu())
-            context.user_data.clear()
-            return
-
-    if text == "📤 ارسال اکانت":
-        await update.message.reply_text("🔢 شماره سفارش را برای ارسال اکانت وارد کنید:", reply_markup=input_cancel_menu())
-        context.user_data["mode"] = "send_account_order"
+        except:
+            await update.message.reply_text("❌ شماره نامعتبر.", reply_markup=admin_menu())
+        context.user_data.clear()
         return
 
-    if context.user_data.get("mode") == "send_account_order":
+    if text == "📤 ارسال اکانت":
+        await update.message.reply_text("شماره سفارش:", reply_markup=input_cancel_menu())
+        context.user_data["mode"] = "send_account"
+        return
+
+    if context.user_data.get("mode") == "send_account":
         try:
-            order_id = int(text)
+            oid = int(text)
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("SELECT user_id, status FROM orders WHERE id=?", (order_id,))
+            c.execute("SELECT user_id, status FROM orders WHERE id=?", (oid,))
             row = c.fetchone()
             conn.close()
             if not row:
-                await update.message.reply_text("❌ سفارش یافت نشد.", reply_markup=admin_menu())
+                await update.message.reply_text("❌ یافت نشد.", reply_markup=admin_menu())
                 context.user_data.clear()
-                return
-            user_id, status = row
-            if status != "paid":
-                await update.message.reply_text("⚠️ این سفارش هنوز پرداخت نشده است.", reply_markup=admin_menu())
+            elif row[1] != "paid":
+                await update.message.reply_text("⚠️ پرداخت نشده.", reply_markup=admin_menu())
                 context.user_data.clear()
-                return
-            context.user_data["mode"] = "send_account_data"
-            context.user_data["order_id"] = order_id
-            context.user_data["user_id"] = user_id
-            await update.message.reply_text("📧 اکانت را به فرمت email | password ارسال کنید:", reply_markup=input_cancel_menu())
-            return
-        except ValueError:
-            await update.message.reply_text("❌ لطفاً شماره سفارش معتبر وارد کنید.", reply_markup=admin_menu())
+            else:
+                context.user_data["mode"] = "send_account_data"
+                context.user_data["order_id"] = oid
+                context.user_data["user_id"] = row[0]
+                await update.message.reply_text("📧 اکانت (email|pass):", reply_markup=input_cancel_menu())
+        except:
+            await update.message.reply_text("❌ شماره نامعتبر.", reply_markup=admin_menu())
             context.user_data.clear()
-            return
+        return
 
     if context.user_data.get("mode") == "send_account_data":
-        account_data = text
-        order_id = context.user_data.get("order_id")
-        user_id = context.user_data.get("user_id")
+        oid, uid = context.user_data["order_id"], context.user_data["user_id"]
         try:
-            await context.bot.send_message(user_id, f"🎉 اکانت سفارش #{order_id} شما:\n\n📧 {account_data}\n\n✅ از خرید شما متشکریم!")
+            await context.bot.send_message(uid, f"🎉 اکانت سفارش #{oid}:\n\n📧 {text}\n\n✅ متشکریم!")
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("UPDATE orders SET status='delivered' WHERE id=?", (oid,))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"✅ ارسال شد.", reply_markup=admin_menu())
         except Exception as e:
-            await update.message.reply_text(f"❌ خطا در ارسال به کاربر: {e}", reply_markup=admin_menu())
-            context.user_data.clear()
-            return
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE orders SET status='delivered' WHERE id=?", (order_id,))
-        conn.commit()
-        conn.close()
-        await update.message.reply_text(f"✅ اکانت سفارش #{order_id} ارسال شد.", reply_markup=admin_menu())
+            await update.message.reply_text(f"❌ خطا: {e}", reply_markup=admin_menu())
         context.user_data.clear()
         return
 
@@ -766,39 +594,32 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = c.fetchall()
         conn.close()
         if not rows:
-            await update.message.reply_text("📭 هیچ سفارش در انتظاری وجود ندارد.", reply_markup=admin_menu())
+            await update.message.reply_text("📭 سفارشی نیست.", reply_markup=admin_menu())
             return
-        msg = "📋 سفارش‌های در انتظار:\n"
+        msg = "📋 در انتظار:\n"
         for r in rows:
-            receipt_status = "✅ رسید" if r[4] else "⏳ بدون رسید"
-            discount_text = f" | 🎟️{r[5]}" if r[5] else ""
-            msg += f"#{r[0]} | @{r[1]} | {r[2]:,}ت{discount_text} | {r[3][:16]} | {receipt_status}\n"
+            rcpt = "✅" if r[4] else "⏳"
+            disc = f"|🎟️{r[5]}" if r[5] else ""
+            msg += f"#{r[0]}|@{r[1]}|{r[2]:,}ت{disc}|{r[3][:16]}|{rcpt}\n"
         await update.message.reply_text(msg, reply_markup=admin_menu())
-        return
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    text = update.message.text
-    if user.id == ADMIN_CHAT_ID:
+    if update.effective_user.id == ADMIN_CHAT_ID:
         return
+    text = update.message.text
     if text == "❌ انصراف و بازگشت":
         context.user_data.clear()
-        await update.message.reply_text("🔙 به منوی اصلی بازگشتید.", reply_markup=main_menu())
+        await update.message.reply_text("🔙 منوی اصلی", reply_markup=main_menu())
         return
     if await handle_discount_code_input(update, context):
         return
     if "waiting_receipt" in context.user_data:
         await handle_receipt(update, context)
-        return
 
 def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
-    job_queue = app.job_queue
-    check_interval = config.get("CHECK_INTERVAL_SECONDS", 60)
-    job_queue.run_repeating(cancel_expired_orders, interval=check_interval, first=10)
-    logger.info(f"Check interval: {check_interval}s")
-
+    app.job_queue.run_repeating(cancel_expired_orders, interval=config.get("CHECK_INTERVAL_SECONDS", 60), first=10)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Regex("^🛒 خرید اکانت$"), buy_start))
     app.add_handler(MessageHandler(filters.Regex("^🎟️ دارم کد تخفیف$"), buy_with_discount))
@@ -813,7 +634,6 @@ def main():
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(MessageHandler(filters.User(ADMIN_CHAT_ID) & filters.TEXT, admin_action))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.User(ADMIN_CHAT_ID) & ~filters.COMMAND, handle_text))
-
     logger.info("🤖 Bot started")
     app.run_polling()
 
@@ -823,21 +643,15 @@ PYEOF
 
 cat > Dockerfile << 'DOCKERFILE'
 FROM python:3.11-slim
-
 WORKDIR /app
-
 RUN pip install --no-cache-dir "python-telegram-bot[job-queue]"==20.7
-
 COPY bot.py .
-
 RUN mkdir -p /app/data
-
 CMD ["python", "bot.py"]
 DOCKERFILE
 
 cat > docker-compose.yml << 'COMPOSE'
 version: '3.8'
-
 services:
   bot:
     build: .
@@ -855,35 +669,103 @@ services:
         max-file: "3"
 COMPOSE
 
-echo "✅ فایل‌های پروژه ساخته شدند."
+    mkdir -p data
+    cd ..
+}
 
-mkdir -p data
-
-if [ ! -f .env ]; then
-    echo ""
-    echo "⚙️ تنظیم اولیه ربات:"
-    read -p "توکن ربات تلگرام: " BOT_TOKEN
-    read -p "آیدی عددی ادمین: " ADMIN_ID
+install_bot() {
+    echo -e "${YELLOW}📦 در حال نصب ربات...${NC}"
+    install_docker
+    create_bot_files
+    cd $BOT_DIR
     
-    cat > .env << EOF
-BOT_TOKEN=$BOT_TOKEN
-ADMIN_ID=$ADMIN_ID
-EOF
-    echo "✅ فایل .env ساخته شد."
-fi
+    if [ ! -f .env ]; then
+        echo ""
+        read -p "توکن ربات تلگرام: " BOT_TOKEN
+        read -p "آیدی عددی ادمین: " ADMIN_ID
+        echo "BOT_TOKEN=$BOT_TOKEN" > .env
+        echo "ADMIN_ID=$ADMIN_ID" >> .env
+    fi
+    
+    docker compose up -d --build
+    cd ..
+    echo -e "${GREEN}✅ ربات نصب و اجرا شد!${NC}"
+}
 
-echo ""
-echo "🐳 ساخت و اجرای کانتینر Docker ..."
+update_bot() {
+    echo -e "${YELLOW}🔄 در حال آپدیت ربات...${NC}"
+    create_bot_files
+    cd $BOT_DIR
+    docker compose down
+    docker compose up -d --build
+    cd ..
+    echo -e "${GREEN}✅ ربات آپدیت شد!${NC}"
+}
 
-docker compose down 2>/dev/null || true
-docker compose up -d --build
+start_bot() {
+    echo -e "${YELLOW}▶️ در حال استارت ربات...${NC}"
+    cd $BOT_DIR
+    docker compose up -d
+    cd ..
+    echo -e "${GREEN}✅ ربات استارت شد!${NC}"
+}
 
-echo ""
-echo "✅ ربات با موفقیت اجرا شد!"
-echo ""
-echo "📋 دستورات مفید:"
-echo "   مشاهده لاگ:     docker compose logs -f"
-echo "   توقف ربات:      docker compose down"
-echo "   ریستارت:        docker compose restart"
-echo "   وضعیت:          docker compose ps"
-echo ""
+restart_bot() {
+    echo -e "${YELLOW}🔁 در حال ری‌استارت ربات...${NC}"
+    cd $BOT_DIR
+    docker compose restart
+    cd ..
+    echo -e "${GREEN}✅ ربات ری‌استارت شد!${NC}"
+}
+
+stop_bot() {
+    echo -e "${YELLOW}⏹️ در حال توقف ربات...${NC}"
+    cd $BOT_DIR
+    docker compose down
+    cd ..
+    echo -e "${GREEN}✅ ربات متوقف شد!${NC}"
+}
+
+backup_bot() {
+    echo -e "${YELLOW}💾 در حال بکاپ گرفتن...${NC}"
+    mkdir -p $BACKUP_DIR
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+    tar -czvf $BACKUP_FILE $BOT_DIR/data $BOT_DIR/.env 2>/dev/null || tar -czvf $BACKUP_FILE $BOT_DIR/data 2>/dev/null
+    echo -e "${GREEN}✅ بکاپ ذخیره شد: $BACKUP_FILE${NC}"
+}
+
+show_logs() {
+    cd $BOT_DIR
+    docker compose logs -f --tail=50
+    cd ..
+}
+
+show_status() {
+    cd $BOT_DIR
+    echo -e "${BLUE}📊 وضعیت ربات:${NC}"
+    docker compose ps
+    cd ..
+}
+
+while true; do
+    show_menu
+    read -p "گزینه را انتخاب کنید: " choice
+    echo ""
+    
+    case $choice in
+        1) install_bot ;;
+        2) update_bot ;;
+        3) start_bot ;;
+        4) restart_bot ;;
+        5) stop_bot ;;
+        6) backup_bot ;;
+        7) show_logs ;;
+        8) show_status ;;
+        0) echo -e "${GREEN}خداحافظ! 👋${NC}"; exit 0 ;;
+        *) echo -e "${RED}❌ گزینه نامعتبر!${NC}" ;;
+    esac
+    
+    echo ""
+    read -p "برای ادامه Enter بزنید..."
+done
